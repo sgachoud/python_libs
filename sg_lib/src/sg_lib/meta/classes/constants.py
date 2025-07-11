@@ -10,7 +10,7 @@ __version__ = "1.0.0"
 __license__ = "MIT"
 
 from typing import Any, NoReturn, Callable
-from ...abstract.exceptions.traced_exception import TracedException
+from ...abstract.exceptions.traced_exceptions import TracedException
 
 
 class ConstantsInstantiationError(TracedException):
