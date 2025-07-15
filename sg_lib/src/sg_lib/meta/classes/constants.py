@@ -6,13 +6,12 @@ Description: This module provides tools to create namespaces (class) of constant
 """
 
 __author__ = "Sébastien Gachoud"
-__version__ = "1.0.0"
 __license__ = "MIT"
 
-from typing import Any, NoReturn, Callable, get_origin
-from types import UnionType
+from collections.abc import Iterable
+from typing import Any, NoReturn, Callable, ClassVar
 from ...abstract.exceptions.traced_exceptions import TracedException
-from ..typing.general import type_hints_from_dict
+from ..typing.annotations_manager import type_hints_from_dict, get_annotations_manager
 
 
 class ConstantsInstantiationError(TracedException):
@@ -27,9 +26,9 @@ class ConstantsModificationError(TracedException):
     """Modification error of a Constants class."""
 
 
-def verify_functions(name: str, namespace: dict[str, Any]) -> None:
-    """Verify that no dissalowed function is added.
-    Dissallowed functions are __new__ and __init__.
+def _verify_functions(name: str, namespace: dict[str, Any]) -> None:
+    """Verify that no disalowed function is added.
+    Disallowed functions are __new__ and __init__.
 
     Args:
         name (str): name of the class.
@@ -45,7 +44,7 @@ def verify_functions(name: str, namespace: dict[str, Any]) -> None:
         )
 
 
-def instantiation_error(name: str) -> Callable[[Any], NoReturn]:
+def _instantiation_error(name: str) -> Callable[[Any], NoReturn]:
     """Helper to format an error message when trying to instantiate a Constants class.
 
     Args:
@@ -63,10 +62,10 @@ def instantiation_error(name: str) -> Callable[[Any], NoReturn]:
     return f
 
 
-def verify_annotations(name: str, namespace: dict[str, Any]) -> None:
-    """Verify that:
-    - no annotated member value is missing.
-    - all annotated type are true types (not type checking annotations).
+def _verify_annotations_and_coerce(
+    name: str, namespace: dict[str, Any], first_in_union: bool
+) -> None:
+    """Verify that no annotated member value is missing and coerce all annotated type.
 
     Args:
         name (str): name of the class.
@@ -78,38 +77,59 @@ def verify_annotations(name: str, namespace: dict[str, Any]) -> None:
     if "__annotations__" in namespace:
         annotations = type_hints_from_dict(namespace["__annotations__"])
         for key in annotations:
+            if key not in namespace["__constants__"]:
+                continue
+            # Ensure that any annotated member has a value.
             if key not in namespace:
                 raise ConstantsCompositionError(
                     f"Attribute '{key}' needs a value in constant class '{name}'."
                 )
 
-            type_hint = annotations[key]
-            if not isinstance(type_hint, type) and (
-                (o := get_origin(type_hint)) is None or o is UnionType
-            ):
-                raise ConstantsCompositionError(
-                    f"Attribute '{key}' of constant class '{name}' needs to have a true type."
+            # coerce type
+            try:
+                namespace[key] = get_annotations_manager().convert_value_to_annotation(
+                    namespace[key], annotations[key], first_in_union
                 )
+            except Exception as e:
+                raise ConstantsCompositionError(
+                    f"Failed to coerce value {namespace[key]!r} to type {annotations[key]} "
+                    f"for constant '{key}' in class '{name}': {e}"
+                ) from e
 
 
 class _ConstantsMetaclass(type):
+    __constants__: tuple[str, ...]
+
     def __new__(
         mcs,
         name: str,
         bases: tuple[type, ...],
         namespace: dict[str, Any],
         /,
+        allow_private: bool = True,
+        first_in_union: bool = False,
         **kwargs: Any,
     ) -> Any:
 
         # verify that no function is added.
-        verify_functions(name, namespace)
+        _verify_functions(name, namespace)
 
         # add an __new__ method that throws an error.
-        namespace["__new__"] = instantiation_error(name)
+        namespace["__new__"] = _instantiation_error(name)
 
-        # verify that no annotated member is missing.
-        verify_annotations(name, namespace)
+        # create a tuple of constant names for introspection.
+        namespace["__constants__"] = (
+            tuple(
+                k
+                for k in namespace["__annotations__"]
+                if allow_private or not k.startswith("_")
+            )
+            if "__annotations__" in namespace
+            else ()
+        )
+
+        # verify that no annotated member is missing and coerce annotated types.
+        _verify_annotations_and_coerce(name, namespace, first_in_union)
 
         cls = super().__new__(mcs, name, bases, namespace, **kwargs)
         return cls
@@ -120,6 +140,63 @@ class _ConstantsMetaclass(type):
             " class cannot be modified."
         )
 
+    def __repr__(cls) -> str:
+        """Returns a string representation of the class."""
+        constants = ", ".join(f"{k}={getattr(cls, k)!r}" for k in cls.__constants__)
+        return f"<ConstantNamespace {cls.__name__}({constants})>"
 
-class ConstantNamespace(metaclass=_ConstantsMetaclass):
-    """Base class to create namespaces (class) of constants."""
+    def __iter__(cls) -> Iterable[str]:
+        return iter(cls.__constants__)
+
+    def __contains__(cls, name: str) -> bool:
+        """Check if a constant name exists."""
+        return name in cls.__constants__
+
+    def __len__(cls) -> int:
+        """Return the number of constants."""
+        return len(cls.__constants__)
+
+    def items(cls) -> list[tuple[str, Any]]:
+        """Return all constants as (name, value) pairs."""
+        return [(k, getattr(cls, k)) for k in cls.__constants__]
+
+    def keys(cls) -> tuple[str, ...]:
+        """Return all constant names."""
+        return cls.__constants__
+
+    def values(cls) -> tuple[Any, ...]:
+        """Return all constant values."""
+        return tuple(getattr(cls, k) for k in cls.__constants__)
+
+    def get(cls, name: str, default: Any = None) -> Any:
+        """Get a constant value with optional default."""
+        return getattr(cls, name, default)
+
+    def has_constant(cls, name: str) -> bool:
+        """Check if a constant exists."""
+        return name in cls.__constants__
+
+
+class ConstantNamespace(metaclass=_ConstantsMetaclass, allow_private=False):
+    """Base class to create namespaces (class) of constants.
+    Examples:
+        >>> class MyConstants(ConstantNamespace):
+        ...    A = 1 # this is not a constant. It needs annotation.
+        ...    _A: int = 1 # this is a constant unless allow_private=False.
+        ...    B: int = 2 # this is a constant.
+        ...    C: int = 3.4 # will result in 3. Values are coerced.
+        ...    path: pathlib.Path = "documents/test.txt" # coerced to a Path.
+        ...    l: list[int] = [1, 1.5, 3] # coerced to [1, 1, 3].
+
+        >>> MyConstants.B
+        2
+
+        >>> MyConstants.C = 3.4 # raises ConstantsModificationError.
+
+        >>> MyConstants.l = [] # raises ConstantsModificationError.
+
+        >>> MyConstants.l.clear() # Does not raise, it is the user's
+        ...                       # responsibility to use unmutable types.
+    """
+
+    __constants__: ClassVar[tuple[str, ...]]
