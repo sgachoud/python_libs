@@ -74,7 +74,7 @@ def is_union(annotation: Any) -> bool:
     Returns:
         bool: Whether the annotation is a union.
     """
-    o = get_origin(annotation)
+    o = get_origin(annotation) or annotation
     return o in (Union, UnionType)
 
 
@@ -250,6 +250,10 @@ def tuple_converter(
     count = len(inner_converters)
 
     def converter(value: Any) -> tuple[Any, ...]:
+        if len(value) != count:
+            raise ConvertingToAnnotationTypeError(
+                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'. Size mismatch."
+            )
         try:
             res = tuple(
                 inner_converter(v)
@@ -259,10 +263,6 @@ def tuple_converter(
             raise ConvertingToAnnotationTypeError(
                 f"Could not convert '{value}' of type '{type(value)}' to '{orig}'."
             ) from e
-        if len(res) != count:
-            raise ConvertingToAnnotationTypeError(
-                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'. Size missmatch."
-            )
         return res
 
     return converter
@@ -773,9 +773,12 @@ def create_value_to_annotation_converter(
     def converter(value: Any) -> Any:
         try:
             return conv(value)
+        except TypingError as e:
+            raise e
         except Exception as e:
             raise ConvertingToAnnotationTypeError(
                 f"Could not convert '{value}' of type '{type(value)}' to '{annotation}'."
+                "An Exception was raised."
             ) from e
 
     return converter

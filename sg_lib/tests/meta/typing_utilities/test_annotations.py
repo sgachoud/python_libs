@@ -183,7 +183,7 @@ class TestConverters:
         """Test union_converter with type conversion."""
         converters: list[Converter] = [type_converter(int), type_converter(str)]
         converter = union_converter(converters, Union[int, str])
-        assert converter("42") == 42  # Converts to int
+        assert converter(42.5) == 42  # Converts to int
 
     def test_union_converter_failure(self):
         """Test union_converter when all conversions fail."""
@@ -546,7 +546,16 @@ class TestCreateValueToAnnotationConverter:
         union_converter_func = create_value_to_annotation_converter(Union[int, str])
         assert union_converter_func(42) == 42
         assert union_converter_func("hello") == "hello"
-        assert union_converter_func("42") == 42  # Converts to int first
+        assert union_converter_func(42.8) == 42  # Converts to int first
+        class CustomType:
+            """Test"""
+
+            def __init__(self, value: int = 100):
+                self.value = value
+            
+            def __str__(self) -> str:
+                return str(self.value)
+        assert union_converter_func(CustomType(42)) == "42"  # Converts to str second
 
     def test_converter_for_tuple(self):
         """Test converter for tuple types."""
@@ -640,7 +649,7 @@ class TestCacheInvalidation:
         class TestType:
             """Test"""
 
-            def __init__(self, value: int = 200):
+            def __init__(self, value: int):
                 self.value = value
 
         # This should fail initially
@@ -648,14 +657,27 @@ class TestCacheInvalidation:
             defaulter_from_annotation(TestType)
 
         # Register a defaulter
-        registry.register_defaulter(TestType, TestType)
+        registry.register_defaulter(TestType, lambda: TestType(200))
 
-        # This should work now (cache should be invalidated)
+        # This should work now.
         try:
             defaulter = defaulter_from_annotation(TestType)
             result = defaulter()
             assert isinstance(result, TestType)
             assert result.value == 200
+        finally:
+            registry.unregister_defaulter(TestType)
+        
+
+        # Register a new defaulter
+        registry.register_defaulter(TestType, lambda: TestType(500))
+        
+        # This should work (cache should be invalidated)
+        try:
+            defaulter = defaulter_from_annotation(TestType)
+            result = defaulter()
+            assert isinstance(result, TestType)
+            assert result.value == 500
         finally:
             registry.unregister_defaulter(TestType)
 
@@ -666,17 +688,33 @@ class TestCacheInvalidation:
         class TestType:
             """Test"""
 
-            def __init__(self, value: Any):
+            def __init__(self, *, value: Any):
                 self.value = value
 
+        # This should fail initially
+        with pytest.raises(DefaultingAnnotationError):
+            defaulter_from_annotation(TestType)
+
         # Register a converter
-        registry.register_converter(TestType, TestType)
+        registry.register_converter(TestType, lambda x: TestType(value=x))
 
         try:
             converter = create_value_to_annotation_converter(TestType)
             result = converter(42)
             assert isinstance(result, TestType)
             assert result.value == 42
+        finally:
+            registry.unregister_converter(TestType)
+
+        # Register a new converter
+        registry.register_converter(TestType, lambda x: TestType(value=str(x)))
+
+        # This should work (cache should be invalidated).
+        try:
+            converter = create_value_to_annotation_converter(TestType)
+            result = converter(42)
+            assert isinstance(result, TestType)
+            assert result.value == "42"
         finally:
             registry.unregister_converter(TestType)
 
@@ -712,7 +750,7 @@ class TestErrorHandling:
         with pytest.raises(ConvertingToAnnotationTypeError) as exc_info:
             convert_value_to_annotation((1, 2, 3), tuple[int, str])
 
-        assert "Size missmatch" in str(exc_info.value)
+        assert "Size mismatch" in str(exc_info.value)
 
     def test_union_all_conversions_fail(self):
         """Test when all union conversions fail."""
