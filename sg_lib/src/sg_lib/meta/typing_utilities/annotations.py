@@ -41,6 +41,7 @@ __license__ = "MIT"
 from functools import lru_cache
 from types import NoneType, UnionType
 from typing import (
+    Iterable,
     Any,
     Callable,
     Union,
@@ -64,6 +65,10 @@ class DefaultingAnnotationError(TypingError):
 class ConvertingToAnnotationTypeError(TypingError):
     """Signals an error while attempting to convert a value to an annotation type."""
 
+
+type Validator = Callable[[Any], bool]
+type Defaulter = Callable[[], Any]
+type Converter = Callable[[Any], Any]
 
 def is_union(annotation: Any) -> bool:
     """Check if an annotation is a union. A union is a Union or UnionType type.
@@ -122,9 +127,40 @@ def resolve_annotation_types(annotations: dict[str, Any]) -> dict[str, Any]:
     X = type("X", (), {"__annotations__": annotations})
     return get_type_hints(X)
 
+def union_validator(
+    inner_validators: list[Validator], _: Any
+) -> Validator:
+    """Create a union validator from inner validators."""
+    return lambda value: any(inner_validator(value) for inner_validator in inner_validators)
+
+def tuple_validator(
+    inner_validators: list[Validator], _: Any
+) -> Validator:
+    """Create a tuple validator from inner validators."""
+    def validator(v: Any) -> bool:
+        if not isinstance(v, tuple):
+            return False
+        return all(inner_validator(v) for inner_validator, v in zip(inner_validators, v)) # type: ignore
+    return validator
+
+def iterable_validator_from_type[T](it_type: type[Iterable[T]], 
+    inner_validators: list[Validator], _: Any
+) -> Validator:
+    """Create a iterable validator creator from inner validators."""
+    def validator(v: Any) -> bool:
+        if not isinstance(v, it_type):
+            return False
+        return all(map(inner_validators[0], v))  # type: ignore
+    return validator
+
+def list_validator(
+    inner_validators: list[Validator], _: Any
+) -> Validator:
+    """Create a list validator from an inner validator."""
+    return iterable_validator_from_type(list, inner_validators, _)
 
 def tuple_defaulter(
-    *inner_defaulters: Callable[[], Any]
+    inner_defaulters: list[Defaulter], orig: Any
 ) -> Callable[[], tuple[Any, ...]]:
     """Create a tuple defaulter from inner defaulters."""
     return lambda: tuple(inner_defaulter() for inner_defaulter in inner_defaulters)
@@ -200,26 +236,25 @@ def strict_union_converter(
 
 
 def union_converter(
-    inner_converters: list[Callable[[Any], Any]], orig: Any
-) -> Callable[[Any], Any]:
+    inner_converters: list[Converter], orig: Any
+) -> Converter:
     """Union converter. Try inner types conversion in order unless the value is already of the type
     of the union.
 
     Args:
-        inner_converters (list[Callable[[Any], Any]]): converters to try.
+        inner_converters (list[Converter]): converters to try.
         orig (Any): original annotation for error messages.
 
     Returns:
-        Callable[[Any], Any]: A function that converts the provided value to
+        Converter: A function that converts the provided value to
                                 the first matching type of the union.
 
     """
-    types = get_args(orig)
+    validator = validator_from_annotation(orig)
 
     def converter(value: Any) -> Any:
-        for t in types:
-            if isinstance(value, t):
-                return value
+        if validator(value):
+            return value
         for inner_converter in inner_converters:
             try:
                 return inner_converter(value)
@@ -233,12 +268,12 @@ def union_converter(
 
 
 def tuple_converter(
-    inner_converters: list[Callable[[Any], Any]], orig: Any
+    inner_converters: list[Converter], orig: Any
 ) -> Callable[[Any], tuple[Any, ...]]:
     """Tuple converter. Converts all element of the iterable to the correct type.
 
     Args:
-        inner_converters (list[Callable[[Any], Any]]): Converters for each element.
+        inner_converters (list[Converter]): Converters for each element.
         orig (Any): original annotation for error messages.
         count (int): Number of elements in the tuple.
 
@@ -269,12 +304,12 @@ def tuple_converter(
 
 
 def list_converter(
-    inner_converters: list[Callable[[Any], Any]], orig: Any
+    inner_converters: list[Converter], orig: Any
 ) -> Callable[[Any], list[Any]]:
     """List converter. Converts all element of the iterable to the correct type.
 
     Args:
-        inner_converters (list[Callable[[Any], Any]]): the converter for each element.
+        inner_converters (list[Converter]): the converter for each element.
                                                        Should be a list of length 1.
         orig (Any): original annotation for error messages.
 
@@ -294,26 +329,40 @@ def list_converter(
     return converter
 
 
-type Defaulter = Callable[[], Any]
-type Converter = Callable[[Any], Any]
-
-
 class TypeRegistry:
     """
-    Static class to manage custom annotations managment. This class should not be accessed directly.
-    It is subject to change to use instances instead.
+    Static class to add custom type behavior to the annotations validation, defaulting and conversion.
     """
 
+    __validators: dict[type, Validator]
     __defaulters: dict[type, Defaulter]
     __converters: dict[type, Converter]
+    __validator_creators: dict[type, Callable[[list[Validator], Any], Validator]]
     __defaulter_creators: dict[type, Callable[[list[Defaulter], Any], Defaulter]]
     __converter_creators: dict[type, Callable[[list[Converter], Any], Converter]]
 
     def __init__(self) -> NoneType:
+        self.__validators = {}
         self.__defaulters = {}
         self.__converters = {}
+        self.__validator_creators = {}
         self.__defaulter_creators = {}
         self.__converter_creators = {}
+
+    def register_validator(self, special_type: type, validator: Validator) -> None:
+        """
+        Register a custom type validator for a specific type. This allows the annotations
+        manager to validate values against the specified type using the provided validator function.
+
+        Args:
+            special_type (type): The type for which the custom validator is registered.
+            validator (Validator): A function that returns True if the value is valid for the
+                                            specified type.
+        """
+        self.__validators[special_type] = validator
+
+        # Invalidate caches
+        validator_from_annotation.cache_clear()
 
     def register_defaulter[T](
         self, special_type: type[T], defaulter: Callable[[], T]
@@ -346,7 +395,29 @@ class TypeRegistry:
         self.__converters[special_type] = caster
 
         # Invalidate caches
-        create_value_to_annotation_converter.cache_clear()
+        converter_from_annotation.cache_clear()
+
+    def register_validator_creator[T](
+        self,
+        special_type: type[T],
+        creator: Callable[[list[Validator], Any], Callable[[Any], bool]],
+    ) -> None:
+        """
+        Register a custom type validator creator for a specific type. This allows the annotations
+        manager to create validators for the specified type using the provided creator function.
+
+        The creator function will receive a list containing a list of validators for each inner type
+        as well as the original annotation.
+
+        Args:
+            special_type (type[T]): The type for which the custom validator creator is registered.
+            creator (Callable[[list[Validator], Any], Callable[[Any], bool]]):
+                    A function that creates a validator function for the specified type.
+        """
+        self.__validator_creators[special_type] = creator
+
+        # Invalidate caches
+        validator_from_annotation.cache_clear()
 
     def register_defaulter_creator[T](
         self,
@@ -390,8 +461,16 @@ class TypeRegistry:
         self.__converter_creators[special_type] = creator
 
         # Invalidate caches
-        create_value_to_annotation_converter.cache_clear()
+        converter_from_annotation.cache_clear()
 
+    def unregister_validator(self, special_type: type) -> None:
+        """Unregister a custom type validator for a specific type.
+
+        Args:
+            special_type (type): The type for which to unregister the custom validator.
+        """
+        self.__validators.pop(special_type, None)
+        
     def unregister_defaulter(self, special_type: type) -> None:
         """Unregister a custom type defaulter for a specific type.
 
@@ -408,6 +487,14 @@ class TypeRegistry:
         """
         self.__converters.pop(special_type, None)
 
+    def unregister_validator_creator(self, special_type: type) -> None:
+        """Unregister a custom type validator creator for a specific type.
+
+        Args:
+            special_type (type): The type for which to unregister the custom validator creator.
+        """
+        self.__validator_creators.pop(special_type, None)
+
     def unregister_defaulter_creator(self, special_type: type) -> None:
         """Unregister a custom type defaulter creator for a specific type.
 
@@ -423,6 +510,19 @@ class TypeRegistry:
             special_type (type): The type for which to unregister the custom converter creator.
         """
         self.__converter_creators.pop(special_type, None)
+
+    def get_validator(self, special_type: type) -> Validator:
+        """Get the validator for a specific type.
+
+        Args:
+            special_type (type): The type for which to get the validator.
+
+        Returns:
+            Validator: The validator function for the specified type.
+        """
+        if special_type not in self.__validators:
+            raise KeyError(f"No validator registered for type {special_type}.")
+        return self.__validators[special_type]
 
     def get_defaulter(self, special_type: type) -> Defaulter:
         """Get the defaulter for a specific type.
@@ -449,6 +549,22 @@ class TypeRegistry:
         if special_type not in self.__converters:
             raise KeyError(f"No converter registered for type {special_type}.")
         return self.__converters[special_type]
+
+    def get_validator_creator(
+        self, special_type: type
+    ) -> Callable[[list[Validator], Any], Validator]:
+        """Get the validator creator for a specific type.
+
+        Args:
+            special_type (type): The type for which to get the validator creator.
+
+        Returns:
+            Callable[[list[Validator], Any], Validator]: The validator creator function for the
+                                                         specified type.
+        """
+        if special_type not in self.__validator_creators:
+            raise KeyError(f"No validator creator registered for type {special_type}.")
+        return self.__validator_creators[special_type]
 
     def get_defaulter_creator(
         self, special_type: type
@@ -482,6 +598,17 @@ class TypeRegistry:
             raise KeyError(f"No converter creator registered for type {special_type}.")
         return self.__converter_creators[special_type]
 
+    def has_validator(self, special_type: type) -> bool:
+        """Check if a validator is registered for a specific type.
+
+        Args:
+            special_type (type): The type for which to check if a validator is registered.
+
+        Returns:
+            bool: True if a validator is registered for the specified type, False otherwise.
+        """
+        return special_type in self.__validators
+
     def has_defaulter(self, special_type: type) -> bool:
         """Check if a defaulter is registered for a specific type.
 
@@ -503,6 +630,17 @@ class TypeRegistry:
             bool: True if a converter is registered for the specified type, False otherwise.
         """
         return special_type in self.__converters
+
+    def has_validator_creator(self, special_type: type) -> bool:
+        """Check if a validator creator is registered for a specific type.
+
+        Args:
+            special_type (type): The type for which to check if a validator creator is registered.
+
+        Returns:
+            bool: True if a validator creator is registered for the specified type, False otherwise.
+        """
+        return special_type in self.__validator_creators
 
     def has_defaulter_creator(self, special_type: type) -> bool:
         """Check if a defaulter creator is registered for a specific type.
@@ -529,8 +667,10 @@ class TypeRegistry:
     def list_registered_types(self) -> dict[str, list[type]]:
         """Get all registered types for debugging/introspection."""
         return {
+            "validators": list(self.__validators.keys()),
             "defaulters": list(self.__defaulters.keys()),
             "converters": list(self.__converters.keys()),
+            "validator_creators": list(self.__validator_creators.keys()),
             "defaulter_creators": list(self.__defaulter_creators.keys()),
             "converter_creators": list(self.__converter_creators.keys()),
         }
@@ -548,6 +688,68 @@ def type_registry() -> TypeRegistry:
     """
     return TypeRegistry()
 
+@lru_cache(128)
+def validator_from_annotation(annotation: Any) -> Validator:
+    """Provides a callable that validates an annotation.
+
+    Args:
+        annotation (Any): The annotation to validate.
+
+    Returns:
+        Validator: The validator function for the provided annotation.
+    """
+    # Converts annotation to a type if it was a forward reference string,
+    # None to NoneType and replace Annotated[T, ...] with T.
+    annotation = resolve_annotation_types({"_": annotation})["_"]
+
+    tr = type_registry()
+
+    # The annotation might still be a composite type. Composites are not types.
+    if isinstance(annotation, type):
+        # Absolute prority to registry validators.
+        if tr.has_validator(annotation):
+            return tr.get_validator(annotation)
+        
+        # Otherwise, just check if it is an instance of the annotation.
+        return lambda v: isinstance(v, annotation)
+
+    # Retrieve the origin of the annotation. Ex.: Union[int, str] -> Union
+    origin = get_origin(annotation)
+    if origin is None:
+        # Something went wrong, we raise.
+        raise DefaultingAnnotationError(
+            f"Could not deduce validator from annotation: {annotation}."
+        )
+
+    # Check if there is a custom validator creator for the origin.
+    if tr.has_validator_creator(origin):
+        return tr.get_validator_creator(origin)(
+            [validator_from_annotation(arg) for arg in get_args(annotation)],
+            annotation,
+        )
+
+    # Migth still be a custom validator. That was not detected before because it was obfuscated
+    # as an annotation.
+    if tr.has_validator(origin):
+        return tr.get_validator(origin)
+
+    # Union is a special case.
+    if is_union(origin):
+        return union_validator([validator_from_annotation(arg) for arg in get_args(annotation)], annotation)
+
+    # Tuple is another special case. All its elements must be validated with a specific validator.
+    if origin is tuple:
+        return tuple_validator(
+            [validator_from_annotation(arg) for arg in get_args(annotation)],
+            annotation,
+        )
+    
+    if origin is list:
+        return list_validator(
+            [validator_from_annotation(arg) for arg in get_args(annotation)],
+            annotation,
+        )
+    return validator_from_annotation(origin)
 
 @overload
 @lru_cache(128)
@@ -634,7 +836,8 @@ def defaulter_from_annotation(annotation: Any) -> Callable[[], Any]:
     # Tuple is another special case. All its elements must be defaulted.
     if origin is tuple:
         return tuple_defaulter(
-            *(defaulter_from_annotation(arg) for arg in get_args(annotation))  # type: ignore todo: fix
+            [defaulter_from_annotation(arg) for arg in get_args(annotation)],  # type: ignore todo: fix
+            annotation,
         )
     return defaulter_from_annotation(origin)  # type: ignore todo: fix
 
@@ -669,7 +872,7 @@ def default_from_annotation(annotation: Any) -> Any:
 
 def _create_value_to_annotation_converter(
     annotation: Any, first_in_union: bool = False
-) -> Callable[[Any], Any]:
+) -> Converter:
     # Converts annotation to a type if it was a forward reference string,
     # None to NoneType and replace Annotated[T, ...] with T.
     annotation = resolve_annotation_types({"_": annotation})["_"]
@@ -699,7 +902,7 @@ def _create_value_to_annotation_converter(
     if tr.has_converter_creator(origin):
         return tr.get_converter_creator(origin)(
             [
-                _create_value_to_annotation_converter(arg)
+                _create_value_to_annotation_converter(arg, first_in_union)
                 for arg in get_args(annotation)
             ],
             annotation,
@@ -715,7 +918,7 @@ def _create_value_to_annotation_converter(
         creator = strict_union_converter if first_in_union else union_converter
         return creator(
             [
-                _create_value_to_annotation_converter(arg)
+                _create_value_to_annotation_converter(arg, first_in_union)
                 for arg in get_args(annotation)
             ],
             annotation,
@@ -727,7 +930,7 @@ def _create_value_to_annotation_converter(
     if origin is tuple:
         return tuple_converter(
             [
-                _create_value_to_annotation_converter(arg)
+                _create_value_to_annotation_converter(arg, first_in_union)
                 for arg in get_args(annotation)
             ],
             annotation,
@@ -737,20 +940,20 @@ def _create_value_to_annotation_converter(
     if origin is list:
         return list_converter(
             [
-                _create_value_to_annotation_converter(arg)
+                _create_value_to_annotation_converter(arg, first_in_union)
                 for arg in get_args(annotation)
             ],
             annotation,
         )
 
     # Try to use origin as annotation.
-    return _create_value_to_annotation_converter(origin)
+    return _create_value_to_annotation_converter(origin, first_in_union)
 
 
 @lru_cache(128)
-def create_value_to_annotation_converter(
+def converter_from_annotation(
     annotation: Any, first_in_union: bool = False
-) -> Callable[[Any], Any]:
+) -> Converter:
     """Provides a callable that converts a value to the provided annotation.
         The resulting callable will do all in its power to convert the provided value
         to match the type described by the provided annotation or throw an exception.
@@ -761,6 +964,9 @@ def create_value_to_annotation_converter(
 
     Args:
         annotation (Any): the annotation to convert to.
+        first_in_union (bool, optional): If True, the converter will try to convert to
+        the first type in the union. Defaults to False. When False, the converter requires
+        a validator for each involved type.
 
     Raises:
         ConvertingToAnnotationTypeError: _description_
@@ -793,8 +999,11 @@ def convert_value_to_annotation(
     Args:
         value (Any): the value to convert.
         annotation (Any): the annotation to convert to.
+        first_in_union (bool, optional): If True, the converter will try to convert to
+        the first type in the union. Defaults to False. When False, the converter requires
+        a validator for each involved type.
 
     Returns:
         Any: the value converted to the provided annotation.
     """
-    return create_value_to_annotation_converter(annotation, first_in_union)(value)
+    return converter_from_annotation(annotation, first_in_union)(value)

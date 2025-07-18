@@ -61,7 +61,7 @@ from sg_lib.src.sg_lib.meta.typing_utilities.annotations import (
     type_registry,
     defaulter_from_annotation,
     default_from_annotation,
-    create_value_to_annotation_converter,
+    converter_from_annotation,
     convert_value_to_annotation,
 )
 
@@ -233,13 +233,13 @@ class TestDefaulters:
 
     def test_tuple_defaulter(self):
         """Test tuple_defaulter function."""
-        defaulter = tuple_defaulter(lambda: 1, lambda: "hello")
+        defaulter = tuple_defaulter([lambda: 1, lambda: "hello"], tuple[int, str])
         result = defaulter()
         assert result == (1, "hello")
 
     def test_tuple_defaulter_empty(self):
         """Test tuple_defaulter with no inner defaulters."""
-        defaulter = tuple_defaulter()
+        defaulter = tuple_defaulter([], tuple)
         result = defaulter()
         assert not result
 
@@ -529,13 +529,13 @@ class TestCreateValueToAnnotationConverter:
 
     def test_converter_for_basic_type(self):
         """Test converter for basic types."""
-        int_converter = create_value_to_annotation_converter(int)
+        int_converter = converter_from_annotation(int)
         assert int_converter("42") == 42
         assert int_converter(42) == 42
 
     def test_converter_for_none_type(self):
         """Test converter for NoneType."""
-        none_converter_func = create_value_to_annotation_converter(NoneType)
+        none_converter_func = converter_from_annotation(NoneType)
         assert none_converter_func(None) is None
 
         with pytest.raises(ConvertingToAnnotationTypeError):
@@ -543,7 +543,7 @@ class TestCreateValueToAnnotationConverter:
 
     def test_converter_for_union(self):
         """Test converter for Union types."""
-        union_converter_func = create_value_to_annotation_converter(Union[int, str])
+        union_converter_func = converter_from_annotation(Union[int, str])
         assert union_converter_func(42) == 42
         assert union_converter_func("hello") == "hello"
         assert union_converter_func(42.8) == 42  # Converts to int first
@@ -559,20 +559,20 @@ class TestCreateValueToAnnotationConverter:
 
     def test_converter_for_tuple(self):
         """Test converter for tuple types."""
-        tuple_converter_func = create_value_to_annotation_converter(tuple[int, str])
+        tuple_converter_func = converter_from_annotation(tuple[int, str])
         result = tuple_converter_func(("42", 123))
         assert result == (42, "123")
 
     def test_converter_for_list(self):
         """Test converter for list types."""
-        list_converter_func = create_value_to_annotation_converter(list[int])
+        list_converter_func = converter_from_annotation(list[int])
         result = list_converter_func(["1", "2", "3"])
         assert result == [1, 2, 3]
 
     def test_converter_with_first_in_union_flag(self):
         """Test converter with first_in_union flag."""
         # This should use strict_union_converter instead of union_converter
-        converter = create_value_to_annotation_converter(
+        converter = converter_from_annotation(
             Union[int, str], first_in_union=True
         )
         assert converter("42") == 42  # Only tries first converter
@@ -596,7 +596,7 @@ class TestCreateValueToAnnotationConverter:
         registry.register_converter(CustomType, custom_converter)
 
         try:
-            converter = create_value_to_annotation_converter(CustomType)
+            converter = converter_from_annotation(CustomType)
             result = converter(42)
             assert isinstance(result, CustomType)
             assert result.value == 42
@@ -605,8 +605,8 @@ class TestCreateValueToAnnotationConverter:
 
     def test_converter_caching(self):
         """Test that create_value_to_annotation_converter caches results."""
-        converter1 = create_value_to_annotation_converter(int)
-        converter2 = create_value_to_annotation_converter(int)
+        converter1 = converter_from_annotation(int)
+        converter2 = converter_from_annotation(int)
         assert converter1 is converter2
 
 
@@ -699,7 +699,7 @@ class TestCacheInvalidation:
         registry.register_converter(TestType, lambda x: TestType(value=x))
 
         try:
-            converter = create_value_to_annotation_converter(TestType)
+            converter = converter_from_annotation(TestType)
             result = converter(42)
             assert isinstance(result, TestType)
             assert result.value == 42
@@ -711,7 +711,7 @@ class TestCacheInvalidation:
 
         # This should work (cache should be invalidated).
         try:
-            converter = create_value_to_annotation_converter(TestType)
+            converter = converter_from_annotation(TestType)
             result = converter(42)
             assert isinstance(result, TestType)
             assert result.value == "42"
@@ -829,7 +829,7 @@ class TestIntegration:
 
         # Test tuple conversion
         result = convert_value_to_annotation((1, 2), complex_type)
-        assert result == ("1", "2")
+        assert result == ("1", "2") # implement top to bottom match.
 
     def test_registry_with_complex_types(self):
         """Test registry with complex generic types."""
