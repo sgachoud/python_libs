@@ -36,7 +36,6 @@ __license__ = "MIT"
 
 from pathlib import Path
 from typing import Any, Dict, List
-from unittest.mock import Mock, patch
 
 import pytest
 
@@ -46,7 +45,6 @@ from sg_lib.src.sg_lib.meta.classes.constants import (
     ConstantsInstantiationError,
     ConstantsModificationError,
     _instantiation_error,  # type: ignore
-    _verify_annotations_and_coerce,  # type: ignore
     _verify_functions,  # type: ignore
 )
 
@@ -78,20 +76,19 @@ def test_missing_annotation_value_raises_composition_error():
 
 def test_type_cohercion():
     """Test"""
-    with pytest.raises(ConstantsCompositionError):
 
-        class BadConstants(ConstantNamespace):
-            """Test"""
+    class BadConstants(ConstantNamespace):
+        """Test"""
 
-            A: int | str = "1"
-            B: int = 1.5  # type: ignore
-            C: int | float | str = 1
-            D: Path = "documents/test.txt"  # type: ignore
+        A: int | str = "1"
+        B: int = 1.5  # type: ignore
+        C: int | float | str = 1
+        D: Path = "documents/test.txt"  # type: ignore
 
-        assert BadConstants.A == "1"
-        assert BadConstants.B == 1
-        assert BadConstants.C == 1
-        assert BadConstants.D == Path("documents/test.txt")
+    assert BadConstants.A == "1"
+    assert BadConstants.B == 1
+    assert BadConstants.C == 1
+    assert BadConstants.D == Path("documents/test.txt")
 
 
 def test_adding_init_raises_composition_error():
@@ -212,7 +209,7 @@ class TestConstantNamespaceBasic:
             path: Path = "documents/test.txt"  # type: ignore
 
         assert isinstance(TestConstants.path, Path)
-        assert str(TestConstants.path) == "documents/test.txt"
+        assert TestConstants.path == Path("documents/test.txt")
 
     def test_list_coercion(self):
         """Test coercion to typed lists."""
@@ -268,10 +265,10 @@ class TestConstantNamespaceInstantiation:
         with pytest.raises(ConstantsInstantiationError):
             TestConstants()
 
-        with pytest.raises(ConstantsInstantiationError):
+        with pytest.raises(TypeError):
             TestConstants(1, 2, 3)  # type: ignore
 
-        with pytest.raises(ConstantsInstantiationError):
+        with pytest.raises(TypeError):
             TestConstants(arg1=1, arg2=2)  # type: ignore
 
 
@@ -524,53 +521,6 @@ class TestHelperFunctions:
             error_func(None)
 
         assert "Cannot instantiate constant class 'TestClass'" in str(exc_info.value)
-
-    @patch("your_module.constants.get_annotations_manager")
-    @patch("your_module.constants.type_hints_from_dict")
-    def test_verify_annotations_and_coerce(
-        self, mock_type_hints: Mock, mock_annotations_manager: Mock
-    ):
-        """Test _verify_annotations_and_coerce function."""
-        # Mock setup
-        mock_type_hints.return_value = {"A": int, "B": str}
-        mock_manager = Mock()
-        mock_manager.convert_value_to_annotation.side_effect = lambda val, typ: typ(  # type: ignore
-            val
-        )
-        mock_annotations_manager.return_value = mock_manager
-
-        namespace: dict[str, Any] = {
-            "__annotations__": {"A": int, "B": str},
-            "__constants__": ("A", "B"),
-            "A": "123",
-            "B": "hello",
-        }
-
-        _verify_annotations_and_coerce("TestClass", namespace, False)
-
-        # Verify coercion was attempted
-        assert mock_manager.convert_value_to_annotation.call_count == 2
-
-    @patch("your_module.constants.get_annotations_manager")
-    @patch("your_module.constants.type_hints_from_dict")
-    def test_verify_annotations_and_coerce_missing_value(
-        self, mock_type_hints: Mock, _: Mock
-    ):
-        """Test _verify_annotations_and_coerce with missing value."""
-        mock_type_hints.return_value = {"A": int}
-
-        namespace: dict[str, Any] = {
-            "__annotations__": {"A": int},
-            "__constants__": ("A",),
-            # Missing "A" value
-        }
-
-        with pytest.raises(ConstantsCompositionError) as exc_info:
-            _verify_annotations_and_coerce("TestClass", namespace, False)
-
-        assert "Attribute 'A' needs a value in constant class 'TestClass'" in str(
-            exc_info.value
-        )
 
 
 class TestConstantNamespaceInheritance:

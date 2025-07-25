@@ -155,6 +155,16 @@ class _ConstantsMetaclass(type):
             else ()
         )
 
+        # add superclasses names
+        for base in bases:
+            if isinstance(base, _ConstantsMetaclass) and reversed(base.__constants__):
+                constants_names = list(base.__constants__)
+                existing = set(base.__constants__)
+                constants_names.extend(
+                    k for k in namespace["__constants__"] if k not in existing
+                )
+                namespace["__constants__"] = tuple(constants_names)
+
         # verify that no annotated member is missing and coerce annotated types.
         _verify_annotations_and_coerce(name, namespace, first_in_union)
 

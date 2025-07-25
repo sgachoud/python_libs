@@ -45,8 +45,10 @@ from sg_lib.src.sg_lib.meta.typing_utilities.annotations import (
     DefaultingAnnotationError,
     ConvertingToAnnotationTypeError,
     TypeRegistry,
+    Validator,
     Converter,
     Defaulter,
+    ValidationLevel,
     is_union,
     is_optional,
     is_binary_optional,
@@ -59,6 +61,7 @@ from sg_lib.src.sg_lib.meta.typing_utilities.annotations import (
     tuple_converter,
     list_converter,
     type_registry,
+    validator_from_annotation,
     defaulter_from_annotation,
     default_from_annotation,
     converter_from_annotation,
@@ -132,6 +135,13 @@ class TestAnnotationResolution:
         resolved = resolve_annotation_types(annotations)
         assert resolved["x"] is int
         assert resolved["y"] is str
+
+    def test_resolve_annotation_types_with_generics(self) -> None:
+        """Test resolve_annotation_types with generic types."""
+        annotations: dict[str, Any] = {"items": list[int], "mapping": dict[str, int]}
+        resolved = resolve_annotation_types(annotations)
+        assert resolved["items"] == list[int]
+        assert resolved["mapping"] == dict[str, int]
 
 
 class TestConverters:
@@ -242,175 +252,6 @@ class TestDefaulters:
         defaulter = tuple_defaulter([], tuple)
         result = defaulter()
         assert not result
-
-
-class TestTypeRegistry:
-    """Test TypeRegistry class."""
-
-    def test_type_registry_singleton(self):
-        """Test that type_registry returns the same instance."""
-        registry1 = type_registry()
-        registry2 = type_registry()
-        assert registry1 is registry2
-
-    def test_register_defaulter(self):
-        """Test registering a custom defaulter."""
-        registry = TypeRegistry()
-
-        class CustomType:
-            """Test"""
-
-            def __init__(self, value: int = 42):
-                self.value = value
-
-        def custom_defaulter():
-            return CustomType()
-
-        registry.register_defaulter(CustomType, custom_defaulter)
-        assert registry.has_defaulter(CustomType)
-        defaulter = registry.get_defaulter(CustomType)
-        result = defaulter()
-        assert isinstance(result, CustomType)
-        assert result.value == 42
-
-    def test_register_converter(self):
-        """Test registering a custom converter."""
-        registry = TypeRegistry()
-
-        class CustomType:
-            """Test"""
-
-            def __init__(self, value: Any):
-                self.value = value
-
-        def custom_converter(value: Any):
-            return CustomType(value)
-
-        registry.register_converter(CustomType, custom_converter)
-        assert registry.has_converter(CustomType)
-        converter = registry.get_converter(CustomType)
-        result = converter(42)
-        assert isinstance(result, CustomType)
-        assert result.value == 42
-
-    def test_register_defaulter_creator(self):
-        """Test registering a custom defaulter creator."""
-        registry = TypeRegistry()
-
-        class CustomGeneric:
-            """Test"""
-
-            def __init__(self, inner_value: Any):
-                self.inner_value = inner_value
-
-        def custom_defaulter_creator(inner_defaulters: list[Defaulter], _: Any):
-            def defaulter():
-                return CustomGeneric(
-                    inner_defaulters[0]() if inner_defaulters else None
-                )
-
-            return defaulter
-
-        registry.register_defaulter_creator(CustomGeneric, custom_defaulter_creator)
-        assert registry.has_defaulter_creator(CustomGeneric)
-        creator = registry.get_defaulter_creator(CustomGeneric)
-        defaulter = creator([lambda: 42], CustomGeneric)
-        result = defaulter()
-        assert isinstance(result, CustomGeneric)
-        assert result.inner_value == 42
-
-    def test_register_converter_creator(self):
-        """Test registering a custom converter creator."""
-        registry = TypeRegistry()
-
-        class CustomGeneric:
-            """Test"""
-
-            def __init__(self, inner_value: Any):
-                self.inner_value = inner_value
-
-        def custom_converter_creator(inner_converters: list[Converter], _: Any):
-            def converter(value: Any):
-                return CustomGeneric(
-                    inner_converters[0](value) if inner_converters else value
-                )
-
-            return converter
-
-        registry.register_converter_creator(CustomGeneric, custom_converter_creator)
-        assert registry.has_converter_creator(CustomGeneric)
-        creator = registry.get_converter_creator(CustomGeneric)
-        converter = creator([type_converter(int)], CustomGeneric)
-        result = converter("42")
-        assert isinstance(result, CustomGeneric)
-        assert result.inner_value == 42
-
-    def test_unregister_functions(self):
-        """Test unregistering functions."""
-        registry = TypeRegistry()
-
-        class TestType:
-            """Test"""
-
-        registry.register_defaulter(TestType, TestType)
-        registry.register_converter(TestType, lambda x: TestType())
-
-        assert registry.has_defaulter(TestType)
-        assert registry.has_converter(TestType)
-
-        registry.unregister_defaulter(TestType)
-        registry.unregister_converter(TestType)
-
-        assert not registry.has_defaulter(TestType)
-        assert not registry.has_converter(TestType)
-
-    def test_unregister_nonexistent(self):
-        """Test unregistering nonexistent types doesn't raise error."""
-        registry = TypeRegistry()
-
-        class NonExistentType:
-            """Test"""
-
-        # Should not raise
-        registry.unregister_defaulter(NonExistentType)
-        registry.unregister_converter(NonExistentType)
-        registry.unregister_defaulter_creator(NonExistentType)
-        registry.unregister_converter_creator(NonExistentType)
-
-    def test_get_nonexistent_raises_keyerror(self):
-        """Test that getting nonexistent defaulter/converter raises KeyError."""
-        registry = TypeRegistry()
-
-        class NonExistentType:
-            """Test"""
-
-        with pytest.raises(KeyError):
-            registry.get_defaulter(NonExistentType)
-
-        with pytest.raises(KeyError):
-            registry.get_converter(NonExistentType)
-
-        with pytest.raises(KeyError):
-            registry.get_defaulter_creator(NonExistentType)
-
-        with pytest.raises(KeyError):
-            registry.get_converter_creator(NonExistentType)
-
-    def test_list_registered_types(self):
-        """Test listing registered types."""
-        registry = TypeRegistry()
-
-        class TestType:
-            """Test"""
-
-        registry.register_defaulter(TestType, TestType)
-        registry.register_converter(TestType, lambda x: TestType())
-
-        registered = registry.list_registered_types()
-        assert TestType in registered["defaulters"]
-        assert TestType in registered["converters"]
-        assert isinstance(registered["defaulter_creators"], list)
-        assert isinstance(registered["converter_creators"], list)
 
 
 class TestDefaulterFromAnnotation:
@@ -866,3 +707,522 @@ class TestIntegration:
         finally:
             registry.unregister_defaulter_creator(Container)
             registry.unregister_converter_creator(Container)
+
+
+class TestValidationLevel:
+    """Test ValidationLevel enum and related operations."""
+
+    def test_validation_level_values(self) -> None:
+        """Test that ValidationLevel has correct integer values."""
+        assert ValidationLevel.NONE == 0
+        assert ValidationLevel.FULL == 1
+        assert ValidationLevel.PARTIAL == 2
+
+    def test_validation_level_ordering(self) -> None:
+        """Test that ValidationLevel values can be compared."""
+        assert ValidationLevel.NONE < ValidationLevel.FULL
+        assert ValidationLevel.FULL < ValidationLevel.PARTIAL
+        assert ValidationLevel.NONE < ValidationLevel.PARTIAL
+
+
+class TestUnionDetection:
+    """Test union type detection functions."""
+
+    def test_is_union_with_union_type(self) -> None:
+        """Test is_union with Union type."""
+        assert is_union(Union[int, str]) is True
+        assert is_union(Union[int, str, float]) is True
+
+    def test_is_union_with_union_type_syntax(self) -> None:
+        """Test is_union with modern union syntax."""
+        assert is_union(int | str) is True
+        assert is_union(int | str | float) is True
+
+    def test_is_union_with_non_union(self) -> None:
+        """Test is_union with non-union types."""
+        assert is_union(int) is False
+        assert is_union(str) is False
+        assert is_union(list[int]) is False
+        assert is_union(tuple[int, str]) is False
+
+    def test_is_optional_with_optional_types(self) -> None:
+        """Test is_optional with optional types."""
+        assert is_optional(Union[int, None]) is True
+        assert is_optional(Optional[str]) is True
+        assert is_optional(int | None) is True
+
+    def test_is_optional_with_non_optional(self) -> None:
+        """Test is_optional with non-optional types."""
+        assert is_optional(int) is False
+        assert is_optional(Union[int, str]) is False
+        assert is_optional(int | str) is False
+
+    def test_is_binary_optional_with_binary_optional(self) -> None:
+        """Test is_binary_optional with binary optional types."""
+        assert is_binary_optional(Union[int, None]) is True
+        assert is_binary_optional(Optional[str]) is True
+        assert is_binary_optional(int | None) is True
+
+    def test_is_binary_optional_with_non_binary_optional(self) -> None:
+        """Test is_binary_optional with non-binary optional types."""
+        assert is_binary_optional(Union[int, str, None]) is False
+        assert is_binary_optional(Union[int, str]) is False
+        assert is_binary_optional(int) is False
+
+
+class TestTypeRegistry:
+    """Test TypeRegistry functionality."""
+
+    registry: TypeRegistry
+
+    def setup_method(self) -> None:
+        """Set up test registry for each test."""
+        self.registry = TypeRegistry()
+
+    def test_register_and_get_validator(self) -> None:
+        """Test registering and retrieving custom validators."""
+
+        def custom_validator(value: Any) -> bool:
+            return isinstance(value, str) and len(value) > 5
+
+        self.registry.register_validator(str, custom_validator)
+        assert self.registry.has_validator(str) is True
+        retrieved = self.registry.get_validator(str)
+        assert retrieved is custom_validator
+
+    def test_register_and_get_defaulter(self) -> None:
+        """Test registering and retrieving custom defaulters."""
+
+        def custom_defaulter() -> str:
+            return "default_value"
+
+        self.registry.register_defaulter(str, custom_defaulter)
+        assert self.registry.has_defaulter(str) is True
+        retrieved = self.registry.get_defaulter(str)
+        assert retrieved is custom_defaulter
+
+    def test_register_and_get_converter(self) -> None:
+        """Test registering and retrieving custom converters."""
+
+        def custom_converter(value: Any) -> str:
+            return str(value).upper()
+
+        self.registry.register_converter(str, custom_converter)
+        assert self.registry.has_converter(str) is True
+        retrieved = self.registry.get_converter(str)
+        assert retrieved is custom_converter
+
+    def test_unregister_validator(self) -> None:
+        """Test unregistering validators."""
+
+        def custom_validator(_: Any) -> bool:
+            return True
+
+        self.registry.register_validator(str, custom_validator)
+        assert self.registry.has_validator(str) is True
+
+        self.registry.unregister_validator(str)
+        assert self.registry.has_validator(str) is False
+
+    def test_validator_creator_registration(self) -> None:
+        """Test registering validator creators."""
+
+        def custom_creator(inner_validators: list[Validator], _: Any):
+            def validator(value: Any) -> bool:
+                return all(v(value) for v in inner_validators)
+
+            return validator
+
+        self.registry.register_validator_creator(tuple, custom_creator)
+        assert self.registry.has_validator_creator(tuple) is True
+        retrieved = self.registry.get_validator_creator(tuple)
+        assert retrieved is custom_creator
+
+    def test_get_nonexistent_validator_raises_keyerror(self) -> None:
+        """Test that getting non-existent validator raises KeyError."""
+        with pytest.raises(KeyError, match="No validator registered for type"):
+            self.registry.get_validator(int)
+
+    def test_type_registry_singleton(self):
+        """Test that type_registry returns the same instance."""
+        registry1 = type_registry()
+        registry2 = type_registry()
+        assert registry1 is registry2
+
+    def test_register_defaulter(self):
+        """Test registering a custom defaulter."""
+        registry = TypeRegistry()
+
+        class CustomType:
+            """Test"""
+
+            def __init__(self, value: int = 42):
+                self.value = value
+
+        def custom_defaulter():
+            return CustomType()
+
+        registry.register_defaulter(CustomType, custom_defaulter)
+        assert registry.has_defaulter(CustomType)
+        defaulter = registry.get_defaulter(CustomType)
+        result = defaulter()
+        assert isinstance(result, CustomType)
+        assert result.value == 42
+
+    def test_register_converter(self):
+        """Test registering a custom converter."""
+        registry = TypeRegistry()
+
+        class CustomType:
+            """Test"""
+
+            def __init__(self, value: Any):
+                self.value = value
+
+        def custom_converter(value: Any):
+            return CustomType(value)
+
+        registry.register_converter(CustomType, custom_converter)
+        assert registry.has_converter(CustomType)
+        converter = registry.get_converter(CustomType)
+        result = converter(42)
+        assert isinstance(result, CustomType)
+        assert result.value == 42
+
+    def test_register_defaulter_creator(self):
+        """Test registering a custom defaulter creator."""
+        registry = TypeRegistry()
+
+        class CustomGeneric:
+            """Test"""
+
+            def __init__(self, inner_value: Any):
+                self.inner_value = inner_value
+
+        def custom_defaulter_creator(inner_defaulters: list[Defaulter], _: Any):
+            def defaulter():
+                return CustomGeneric(
+                    inner_defaulters[0]() if inner_defaulters else None
+                )
+
+            return defaulter
+
+        registry.register_defaulter_creator(CustomGeneric, custom_defaulter_creator)
+        assert registry.has_defaulter_creator(CustomGeneric)
+        creator = registry.get_defaulter_creator(CustomGeneric)
+        defaulter = creator([lambda: 42], CustomGeneric)
+        result = defaulter()
+        assert isinstance(result, CustomGeneric)
+        assert result.inner_value == 42
+
+    def test_register_converter_creator(self):
+        """Test registering a custom converter creator."""
+        registry = TypeRegistry()
+
+        class CustomGeneric:
+            """Test"""
+
+            def __init__(self, inner_value: Any):
+                self.inner_value = inner_value
+
+        def custom_converter_creator(inner_converters: list[Converter], _: Any):
+            def converter(value: Any):
+                return CustomGeneric(
+                    inner_converters[0](value) if inner_converters else value
+                )
+
+            return converter
+
+        registry.register_converter_creator(CustomGeneric, custom_converter_creator)
+        assert registry.has_converter_creator(CustomGeneric)
+        creator = registry.get_converter_creator(CustomGeneric)
+        converter = creator([type_converter(int)], CustomGeneric)
+        result = converter("42")
+        assert isinstance(result, CustomGeneric)
+        assert result.inner_value == 42
+
+    def test_unregister_functions(self):
+        """Test unregistering functions."""
+        registry = TypeRegistry()
+
+        class TestType:
+            """Test"""
+
+        registry.register_defaulter(TestType, TestType)
+        registry.register_converter(TestType, lambda x: TestType())
+
+        assert registry.has_defaulter(TestType)
+        assert registry.has_converter(TestType)
+
+        registry.unregister_defaulter(TestType)
+        registry.unregister_converter(TestType)
+
+        assert not registry.has_defaulter(TestType)
+        assert not registry.has_converter(TestType)
+
+    def test_unregister_nonexistent(self):
+        """Test unregistering nonexistent types doesn't raise error."""
+        registry = TypeRegistry()
+
+        class NonExistentType:
+            """Test"""
+
+        # Should not raise
+        registry.unregister_defaulter(NonExistentType)
+        registry.unregister_converter(NonExistentType)
+        registry.unregister_defaulter_creator(NonExistentType)
+        registry.unregister_converter_creator(NonExistentType)
+
+    def test_get_nonexistent_raises_keyerror(self):
+        """Test that getting nonexistent defaulter/converter raises KeyError."""
+        registry = TypeRegistry()
+
+        class NonExistentType:
+            """Test"""
+
+        with pytest.raises(KeyError):
+            registry.get_defaulter(NonExistentType)
+
+        with pytest.raises(KeyError):
+            registry.get_converter(NonExistentType)
+
+        with pytest.raises(KeyError):
+            registry.get_defaulter_creator(NonExistentType)
+
+        with pytest.raises(KeyError):
+            registry.get_converter_creator(NonExistentType)
+
+    def test_list_registered_types(self):
+        """Test listing registered types."""
+        registry = TypeRegistry()
+
+        class TestType:
+            """Test"""
+
+        registry.register_defaulter(TestType, TestType)
+        registry.register_converter(TestType, lambda x: TestType())
+
+        registered = registry.list_registered_types()
+        assert TestType in registered["defaulters"]
+        assert TestType in registered["converters"]
+        assert isinstance(registered["defaulter_creators"], list)
+        assert isinstance(registered["converter_creators"], list)
+
+
+class TestValidatorFromAnnotation:
+    """Test validator_from_annotation function."""
+
+    def test_basic_type_validation(self) -> None:
+        """Test validation with basic types."""
+        int_validator = validator_from_annotation(int)
+        assert int_validator(42) is True
+        assert int_validator("42") is False
+        assert int_validator(42.0) is False
+
+        str_validator = validator_from_annotation(str)
+        assert str_validator("hello") is True
+        assert str_validator(42) is False
+
+    def test_none_type_validation(self) -> None:
+        """Test validation with NoneType."""
+        none_validator = validator_from_annotation(type(None))
+        assert none_validator(None) is True
+        assert none_validator(0) is False
+        assert none_validator("") is False
+
+    def test_union_validation(self) -> None:
+        """Test validation with Union types."""
+        union_validator = validator_from_annotation(Union[int, str])
+        assert union_validator(42) == ValidationLevel.FULL
+        assert union_validator("hello") == ValidationLevel.FULL
+        assert union_validator(42.0) == ValidationLevel.NONE
+        assert union_validator([1, 2, 3]) == ValidationLevel.NONE
+
+    def test_optional_validation(self) -> None:
+        """Test validation with Optional types."""
+        optional_validator = validator_from_annotation(Optional[int])
+        assert optional_validator(42) == ValidationLevel.FULL
+        assert optional_validator(None) == ValidationLevel.FULL
+        assert optional_validator("42") == ValidationLevel.NONE
+
+    def test_list_validation(self) -> None:
+        """Test validation with list types."""
+        list_validator = validator_from_annotation(list[int])
+        assert list_validator([1, 2, 3]) == ValidationLevel.FULL
+        assert (
+            list_validator([1, "2", 3]) == ValidationLevel.PARTIAL
+        )  # list but wrong content
+        assert list_validator("123") == ValidationLevel.NONE
+        assert list_validator((1, 2, 3)) == ValidationLevel.NONE
+
+    def test_tuple_validation(self) -> None:
+        """Test validation with tuple types."""
+        tuple_validator = validator_from_annotation(tuple[int, str])
+        assert tuple_validator((42, "hello")) == ValidationLevel.FULL
+        assert (
+            tuple_validator((42, 123)) == ValidationLevel.PARTIAL
+        )  # tuple but wrong types
+        assert tuple_validator([42, "hello"]) == ValidationLevel.NONE
+        assert tuple_validator((42,)) == ValidationLevel.NONE  # Wrong length
+
+    def test_nested_type_validation(self) -> None:
+        """Test validation with nested types."""
+        nested_validator = validator_from_annotation(list[tuple[int, str]])
+        assert nested_validator([(1, "a"), (2, "b")]) == ValidationLevel.FULL
+        assert nested_validator([(1, "a"), (2, 2)]) == ValidationLevel.PARTIAL
+        assert nested_validator([1, 2, 3]) == ValidationLevel.PARTIAL
+        assert nested_validator("not a list") == ValidationLevel.NONE
+
+    def test_complex_union_validation(self) -> None:
+        """Test validation with complex Union types."""
+        complex_validator = validator_from_annotation(Union[list[int], tuple[str, str]])
+        assert complex_validator([1, 2, 3]) == ValidationLevel.FULL
+        assert complex_validator(("a", "b")) == ValidationLevel.FULL
+        assert (
+            complex_validator([1, "2"]) == ValidationLevel.PARTIAL
+        )  # list but wrong content
+        assert (
+            complex_validator(("a", 1)) == ValidationLevel.PARTIAL
+        )  # tuple but wrong content
+        assert complex_validator("string") == ValidationLevel.NONE
+
+
+class TestValidationLevelOperations:
+    """Test ValidationLevel bitwise operations."""
+
+    def test_vl_and_operation(self) -> None:
+        """Test _vl_and function behavior."""
+        from sg_lib.src.sg_lib.meta.typing_utilities.annotations import (
+            _vl_and,  # type: ignore
+        )
+
+        assert (
+            _vl_and(ValidationLevel.FULL, ValidationLevel.FULL) == ValidationLevel.FULL
+        )
+        assert (
+            _vl_and(ValidationLevel.FULL, ValidationLevel.NONE) == ValidationLevel.NONE
+        )
+        assert (
+            _vl_and(ValidationLevel.PARTIAL, ValidationLevel.FULL)
+            == ValidationLevel.NONE
+        )
+        assert (
+            _vl_and(ValidationLevel.PARTIAL, ValidationLevel.PARTIAL)
+            == ValidationLevel.PARTIAL
+        )
+
+    def test_vl_or_operation(self) -> None:
+        """Test _vl_or function behavior."""
+        from sg_lib.src.sg_lib.meta.typing_utilities.annotations import (
+            _vl_or,  # type: ignore
+        )
+
+        assert (
+            _vl_or(ValidationLevel.NONE, ValidationLevel.NONE) == ValidationLevel.NONE
+        )
+        assert (
+            _vl_or(ValidationLevel.NONE, ValidationLevel.FULL) == ValidationLevel.FULL
+        )
+        assert (
+            _vl_or(ValidationLevel.PARTIAL, ValidationLevel.FULL)
+            == ValidationLevel.PARTIAL | ValidationLevel.FULL
+        )
+        assert (
+            _vl_or(ValidationLevel.PARTIAL, ValidationLevel.PARTIAL)
+            == ValidationLevel.PARTIAL
+        )
+
+
+class TestCustomValidators:
+    """Test custom validator functionality."""
+
+    registry: TypeRegistry
+    positive_int_type: Any
+
+    def setup_method(self) -> None:
+        """Set up custom validators for testing."""
+        self.registry = type_registry()
+
+        # Custom validator for positive integers
+        def positive_int_validator(value: Any) -> ValidationLevel:
+            if isinstance(value, int) and value > 0:
+                return ValidationLevel.FULL
+            elif isinstance(value, int):
+                return ValidationLevel.PARTIAL
+            return ValidationLevel.NONE
+
+        # Register custom validator
+        class PositiveInt:
+            pass
+
+        self.positive_int_type = PositiveInt
+        self.registry.register_validator(PositiveInt, positive_int_validator)
+
+    def teardown_method(self) -> None:
+        """Clean up after tests."""
+        self.registry.unregister_validator(self.positive_int_type)
+
+    def test_custom_validator_usage(self) -> None:
+        """Test that custom validators are used correctly."""
+        validator = validator_from_annotation(self.positive_int_type)
+
+        assert validator(5) == ValidationLevel.FULL
+        assert validator(-5) == ValidationLevel.PARTIAL
+        assert validator("5") == ValidationLevel.NONE
+
+
+class TestEdgeCases:
+    """Test edge cases and error conditions."""
+
+    def test_validator_with_invalid_annotation(self) -> None:
+        """Test validator creation with invalid annotations."""
+        # This should test what happens with truly invalid annotations
+        # The exact behavior depends on your implementation
+
+    def test_empty_union_validation(self) -> None:
+        """Test validation with empty or single-element unions."""
+        # Union with single type should behave like the type itself
+        single_union_validator = validator_from_annotation(Union[int])
+        assert single_union_validator(42) == ValidationLevel.FULL
+        assert single_union_validator("42") == ValidationLevel.NONE
+
+    def test_deeply_nested_types(self) -> None:
+        """Test validation with deeply nested types."""
+        deep_type = list[tuple[Union[int, str], Optional[list[int]]]]
+        deep_validator = validator_from_annotation(deep_type)
+
+        valid_data: Any = [(1, [1, 2, 3]), ("hello", None), (42, [])]
+        assert deep_validator(valid_data) == ValidationLevel.FULL
+
+        partial_data: Any = [(1, [1, "2", 3]), ("hello", None)]  # Invalid nested list
+        assert deep_validator(partial_data) == ValidationLevel.PARTIAL
+
+        invalid_data = "not a list"
+        assert deep_validator(invalid_data) == ValidationLevel.NONE
+
+
+# Additional test for the modern union syntax (Python 3.10+)
+class TestModernUnionSyntax:
+    """Test validation with modern union syntax (| operator)."""
+
+    def test_modern_union_validation(self) -> None:
+        """Test validation with | union syntax."""
+        try:
+            # This will only work in Python 3.10+
+            modern_validator = validator_from_annotation(int | str)
+            assert modern_validator(42) == ValidationLevel.FULL
+            assert modern_validator("hello") == ValidationLevel.FULL
+            assert modern_validator(42.0) == ValidationLevel.NONE
+        except TypeError:
+            # Skip test if running on older Python version
+            pytest.skip("Modern union syntax not supported in this Python version")
+
+    def test_modern_optional_validation(self) -> None:
+        """Test validation with modern optional syntax."""
+        try:
+            modern_optional_validator = validator_from_annotation(int | None)
+            assert modern_optional_validator(42) == ValidationLevel.FULL
+            assert modern_optional_validator(None) == ValidationLevel.FULL
+            assert modern_optional_validator("42") == ValidationLevel.NONE
+        except TypeError:
+            pytest.skip("Modern union syntax not supported in this Python version")

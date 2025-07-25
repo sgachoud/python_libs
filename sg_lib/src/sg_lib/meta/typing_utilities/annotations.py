@@ -171,7 +171,7 @@ def tuple_validator(
 ) -> Validator:
     """Create a tuple validator from inner validators."""
     def validator(vs: Any) -> ValidationLevel:
-        if not isinstance(vs, tuple):
+        if not isinstance(vs, tuple) or len(vs) != len(inner_validators):  # type: ignore
             return ValidationLevel.NONE
         r = reduce(
             _vl_and, map(lambda f, v: f(v), inner_validators, vs), ValidationLevel.FULL  # type: ignore
