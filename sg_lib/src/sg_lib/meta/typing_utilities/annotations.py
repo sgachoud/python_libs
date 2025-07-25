@@ -41,7 +41,6 @@ __license__ = "MIT"
 
 from enum import IntEnum
 from functools import lru_cache, reduce
-from operator import or_, and_
 from types import NoneType, UnionType
 from typing import (
     Iterable,
@@ -82,6 +81,14 @@ class ValidationLevel(IntEnum):
     NONE = 0
     FULL = 1
     PARTIAL = 2
+
+
+def _vl_and(vl1: int, vl2: int) -> int:
+    return int(vl1) & int(vl2)
+
+
+def _vl_or(vl1: int, vl2: int) -> int:
+    return int(vl1) | int(vl2)
 
 
 type Validator = Callable[[Any], bool] | Callable[[Any], ValidationLevel]
@@ -150,7 +157,7 @@ def union_validator(
 ) -> Validator:
     """Create a union validator from inner validators."""
     def validator(v: Any) -> ValidationLevel:
-        r = reduce(or_, map(lambda f: f(v), inner_validators), ValidationLevel.NONE)
+        r = reduce(_vl_or, map(lambda f: f(v), inner_validators), ValidationLevel.NONE)
         if r & ValidationLevel.FULL:
             return ValidationLevel.FULL
         if r & ValidationLevel.PARTIAL:
@@ -167,7 +174,7 @@ def tuple_validator(
         if not isinstance(vs, tuple):
             return ValidationLevel.NONE
         r = reduce(
-            and_, map(lambda f, v: f(v), inner_validators, vs), ValidationLevel.FULL  # type: ignore
+            _vl_and, map(lambda f, v: f(v), inner_validators, vs), ValidationLevel.FULL  # type: ignore
         )
         return ValidationLevel(r) or ValidationLevel.PARTIAL
 
@@ -182,7 +189,7 @@ def iterable_validator_from_type[T](
         if not isinstance(vs, it_type):
             return ValidationLevel.NONE
         r = reduce(
-            and_, map(inner_validators[0], vs), ValidationLevel.FULL  # type: ignore
+            _vl_and, map(inner_validators[0], vs), ValidationLevel.FULL  # type: ignore
         )
         return ValidationLevel(r) or ValidationLevel.PARTIAL
 
@@ -287,7 +294,7 @@ def union_converter(
                                 the first matching type of the union.
 
     """
-    validators = map(validator_from_annotation, get_args(orig))
+    validators = list(map(validator_from_annotation, get_args(orig)))
 
     def converter(value: Any) -> Any:
         partials: list[Converter] = []
@@ -336,7 +343,7 @@ def tuple_converter(
             raise ConvertingToAnnotationTypeError(
                 f"Could not convert '{value}' of type '{type(value)}' to '{orig}'. Size mismatch."
             )
-        if validator(value):
+        if validator(value) == ValidationLevel.FULL:
             return value
         try:
             res = tuple(
@@ -369,7 +376,7 @@ def list_converter(
     validator = validator_from_annotation(orig)
 
     def converter(value: Any) -> list[Any]:
-        if validator(value):
+        if validator(value) == ValidationLevel.FULL:
             return value
         try:
             return list(map(inner_converters[0], value))
