@@ -35,10 +35,13 @@ Description: This module provides tools to manage annotations and types. This in
 🦙
 """
 
+
 __author__ = "Sébastien Gachoud"
 __license__ = "MIT"
 
-from functools import lru_cache
+from enum import IntEnum
+from functools import lru_cache, reduce
+from operator import or_, and_
 from types import NoneType, UnionType
 from typing import (
     Iterable,
@@ -66,7 +69,22 @@ class ConvertingToAnnotationTypeError(TypingError):
     """Signals an error while attempting to convert a value to an annotation type."""
 
 
-type Validator = Callable[[Any], bool]
+class ValidationLevel(IntEnum):
+    """Validation level for type checking.
+
+    NONE: No validation. The value does not match the annotation.
+    FULL: The value matches the annotation.
+    PARTIAL: The value matches the top level annotation. For example, [1, "2"] matches partialy
+        list[str] because it is a list but it does not contains only strings. ("1", "2") does not
+        match because it is not a list.
+    """
+
+    NONE = 0
+    FULL = 1
+    PARTIAL = 2
+
+
+type Validator = Callable[[Any], bool] | Callable[[Any], ValidationLevel]
 type Defaulter = Callable[[], Any]
 type Converter = Callable[[Any], Any]
 
@@ -131,27 +149,45 @@ def union_validator(
     inner_validators: list[Validator], _: Any
 ) -> Validator:
     """Create a union validator from inner validators."""
-    return lambda value: any(inner_validator(value) for inner_validator in inner_validators)
+    def validator(v: Any) -> ValidationLevel:
+        r = reduce(or_, map(lambda f: f(v), inner_validators), ValidationLevel.NONE)
+        if r & ValidationLevel.FULL:
+            return ValidationLevel.FULL
+        if r & ValidationLevel.PARTIAL:
+            return ValidationLevel.PARTIAL
+        return ValidationLevel.NONE
+
+    return validator
 
 def tuple_validator(
     inner_validators: list[Validator], _: Any
 ) -> Validator:
     """Create a tuple validator from inner validators."""
-    def validator(v: Any) -> bool:
-        if not isinstance(v, tuple):
-            return False
-        return all(inner_validator(v) for inner_validator, v in zip(inner_validators, v)) # type: ignore
+    def validator(vs: Any) -> ValidationLevel:
+        if not isinstance(vs, tuple):
+            return ValidationLevel.NONE
+        r = reduce(
+            and_, map(lambda f, v: f(v), inner_validators, vs), ValidationLevel.FULL  # type: ignore
+        )
+        return ValidationLevel(r) or ValidationLevel.PARTIAL
+
     return validator
 
-def iterable_validator_from_type[T](it_type: type[Iterable[T]], 
-    inner_validators: list[Validator], _: Any
+
+def iterable_validator_from_type[T](
+    it_type: type[Iterable[T]], inner_validators: list[Validator], _: Any
 ) -> Validator:
     """Create a iterable validator creator from inner validators."""
-    def validator(v: Any) -> bool:
-        if not isinstance(v, it_type):
-            return False
-        return all(map(inner_validators[0], v))  # type: ignore
+    def validator(vs: Any) -> ValidationLevel:
+        if not isinstance(vs, it_type):
+            return ValidationLevel.NONE
+        r = reduce(
+            and_, map(inner_validators[0], vs), ValidationLevel.FULL  # type: ignore
+        )
+        return ValidationLevel(r) or ValidationLevel.PARTIAL
+
     return validator
+
 
 def list_validator(
     inner_validators: list[Validator], _: Any
@@ -159,8 +195,9 @@ def list_validator(
     """Create a list validator from an inner validator."""
     return iterable_validator_from_type(list, inner_validators, _)
 
+
 def tuple_defaulter(
-    inner_defaulters: list[Defaulter], orig: Any
+    inner_defaulters: list[Defaulter], _: Any
 ) -> Callable[[], tuple[Any, ...]]:
     """Create a tuple defaulter from inner defaulters."""
     return lambda: tuple(inner_defaulter() for inner_defaulter in inner_defaulters)
@@ -238,8 +275,8 @@ def strict_union_converter(
 def union_converter(
     inner_converters: list[Converter], orig: Any
 ) -> Converter:
-    """Union converter. Try inner types conversion in order unless the value is already of the type
-    of the union.
+    """Union converter. Try inner types conversion in order unless the value is already of a type
+    of the union. Partial matches are tested first.
 
     Args:
         inner_converters (list[Converter]): converters to try.
@@ -250,12 +287,21 @@ def union_converter(
                                 the first matching type of the union.
 
     """
-    validator = validator_from_annotation(orig)
+    validators = map(validator_from_annotation, get_args(orig))
 
     def converter(value: Any) -> Any:
-        if validator(value):
-            return value
-        for inner_converter in inner_converters:
+        partials: list[Converter] = []
+        others: list[Converter] = []
+        for validator, inner_converter in zip(validators, inner_converters):
+            match ValidationLevel(validator(value)):
+                case ValidationLevel.NONE:
+                    others.append(inner_converter)
+                case ValidationLevel.FULL:
+                    return value
+                case ValidationLevel.PARTIAL:
+                    partials.append(inner_converter)
+
+        for inner_converter in partials + others:
             try:
                 return inner_converter(value)
             except Exception:  # pylint: disable=broad-except
@@ -283,12 +329,15 @@ def tuple_converter(
     """
 
     count = len(inner_converters)
+    validator = validator_from_annotation(orig)
 
     def converter(value: Any) -> tuple[Any, ...]:
         if len(value) != count:
             raise ConvertingToAnnotationTypeError(
                 f"Could not convert '{value}' of type '{type(value)}' to '{orig}'. Size mismatch."
             )
+        if validator(value):
+            return value
         try:
             res = tuple(
                 inner_converter(v)
@@ -317,8 +366,11 @@ def list_converter(
         Callable[[Any], list[Any]]: A function that converts the provided value to
                                 a list with the correct type.
     """
+    validator = validator_from_annotation(orig)
 
     def converter(value: Any) -> list[Any]:
+        if validator(value):
+            return value
         try:
             return list(map(inner_converters[0], value))
         except Exception as e:
@@ -331,7 +383,8 @@ def list_converter(
 
 class TypeRegistry:
     """
-    Static class to add custom type behavior to the annotations validation, defaulting and conversion.
+    Static class to add custom type behavior to the annotations validation, defaulting and
+    conversion.
     """
 
     __validators: dict[type, Validator]
@@ -353,6 +406,11 @@ class TypeRegistry:
         """
         Register a custom type validator for a specific type. This allows the annotations
         manager to validate values against the specified type using the provided validator function.
+
+        Returning a ValidationLevel with the validator allows for more fine-grained control. For
+        example, the validator can return ValidationLevel.PARTIAL if you have a tuple("1", "2")
+        to convert to Union[list[int], tuple[int, int]] so that it can be converted to tuple(1, 2)
+        instead of [1, 2].
 
         Args:
             special_type (type): The type for which the custom validator is registered.
@@ -470,7 +528,7 @@ class TypeRegistry:
             special_type (type): The type for which to unregister the custom validator.
         """
         self.__validators.pop(special_type, None)
-        
+
     def unregister_defaulter(self, special_type: type) -> None:
         """Unregister a custom type defaulter for a specific type.
 
@@ -709,7 +767,7 @@ def validator_from_annotation(annotation: Any) -> Validator:
         # Absolute prority to registry validators.
         if tr.has_validator(annotation):
             return tr.get_validator(annotation)
-        
+
         # Otherwise, just check if it is an instance of the annotation.
         return lambda v: isinstance(v, annotation)
 
@@ -735,7 +793,10 @@ def validator_from_annotation(annotation: Any) -> Validator:
 
     # Union is a special case.
     if is_union(origin):
-        return union_validator([validator_from_annotation(arg) for arg in get_args(annotation)], annotation)
+        return union_validator(
+            [validator_from_annotation(arg) for arg in get_args(annotation)],
+            annotation,
+        )
 
     # Tuple is another special case. All its elements must be validated with a specific validator.
     if origin is tuple:
@@ -743,7 +804,7 @@ def validator_from_annotation(annotation: Any) -> Validator:
             [validator_from_annotation(arg) for arg in get_args(annotation)],
             annotation,
         )
-    
+
     if origin is list:
         return list_validator(
             [validator_from_annotation(arg) for arg in get_args(annotation)],
