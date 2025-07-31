@@ -35,7 +35,7 @@ __author__ = "Sébastien Gachoud"
 __license__ = "MIT"
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Final
 
 import pytest
 
@@ -79,16 +79,21 @@ def test_type_cohercion():
 
     class BadConstants(ConstantNamespace):
         """Test"""
+        from typing import ClassVar
 
         A: int | str = "1"
         B: int = 1.5  # type: ignore
         C: int | float | str = 1
         D: Path = "documents/test.txt"  # type: ignore
+        E: Final[int] = 1.5  # type: ignore
+        F: ClassVar[int] = 1.5  # type: ignore
 
     assert BadConstants.A == "1"
     assert BadConstants.B == 1
     assert BadConstants.C == 1
     assert BadConstants.D == Path("documents/test.txt")
+    assert BadConstants.E == 1
+    assert BadConstants.F == 1
 
 
 def test_adding_init_raises_composition_error():
@@ -217,7 +222,7 @@ class TestConstantNamespaceBasic:
         class TestConstants(ConstantNamespace):
             """Test"""
 
-            int_list: List[int] = [1, 1.5, 3]  # type: ignore
+            int_list: list[int] = [1, 1.5, 3]  # type: ignore
 
         assert TestConstants.int_list == [1, 1, 3]
         assert all(isinstance(x, int) for x in TestConstants.int_list)
@@ -308,8 +313,8 @@ class TestConstantNamespaceModification:
         class TestConstants(ConstantNamespace):
             """Test"""
 
-            my_list: List[int] = [1, 2, 3]
-            my_dict: Dict[str, int] = {"a": 1}
+            my_list: list[int] = [1, 2, 3]
+            my_dict: dict[str, int] = {"a": 1}
 
         # The reference cannot be changed, but the object itself can be modified
         TestConstants.my_list.append(4)
@@ -595,7 +600,7 @@ class TestConstantNamespaceEdgeCases:
         class TestConstants(ConstantNamespace):
             """Test"""
 
-            complex_list: List[Dict[str, int]] = [{"a": 1}, {"b": 2}]
+            complex_list: list[dict[str, int]] = [{"a": 1}, {"b": 2}]
 
         assert TestConstants.complex_list == [{"a": 1}, {"b": 2}]
         assert "complex_list" in TestConstants.__constants__

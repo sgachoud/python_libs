@@ -53,13 +53,13 @@ from sg_lib.src.sg_lib.meta.typing_utilities.annotations import (
     is_optional,
     is_binary_optional,
     resolve_annotation_types,
-    tuple_defaulter,
+    create_tuple_defaulter,
     none_converter,
     type_converter,
     strict_union_converter,
     union_converter,
-    tuple_converter,
-    list_converter,
+    create_tuple_converter,
+    iterable_converter_creator_from_type,
     type_registry,
     validator_from_annotation,
     defaulter_from_annotation,
@@ -205,35 +205,35 @@ class TestConverters:
     def test_tuple_converter_success(self):
         """Test tuple_converter with correct input."""
         converters: list[Converter] = [type_converter(int), type_converter(str)]
-        converter = tuple_converter(converters, tuple[int, str])
+        converter = create_tuple_converter(converters, tuple[int, str])
         result = converter(("42", 123))
         assert result == (42, "123")
 
     def test_tuple_converter_size_mismatch(self):
         """Test tuple_converter with size mismatch."""
         converters: list[Converter] = [type_converter(int), type_converter(str)]
-        converter = tuple_converter(converters, tuple[int, str])
+        converter = create_tuple_converter(converters, tuple[int, str])
         with pytest.raises(ConvertingToAnnotationTypeError):
             converter((42,))  # Too few elements
 
     def test_tuple_converter_conversion_error(self):
         """Test tuple_converter with conversion error."""
         converters: list[Converter] = [type_converter(int), type_converter(str)]
-        converter = tuple_converter(converters, tuple[int, str])
+        converter = create_tuple_converter(converters, tuple[int, str])
         with pytest.raises(ConvertingToAnnotationTypeError):
             converter(("not a number", 123))
 
     def test_list_converter_success(self):
         """Test list_converter with correct input."""
         converters = [type_converter(int)]
-        converter = list_converter(converters, list[int])
+        converter = iterable_converter_creator_from_type(list)(converters, list[int])
         result = converter(["1", "2", "3"])
         assert result == [1, 2, 3]
 
     def test_list_converter_failure(self):
         """Test list_converter with conversion error."""
         converters = [type_converter(int)]
-        converter = list_converter(converters, list[int])
+        converter = iterable_converter_creator_from_type(list)(converters, list[int])
         with pytest.raises(ConvertingToAnnotationTypeError):
             converter(["not", "numbers"])
 
@@ -243,13 +243,13 @@ class TestDefaulters:
 
     def test_tuple_defaulter(self):
         """Test tuple_defaulter function."""
-        defaulter = tuple_defaulter([lambda: 1, lambda: "hello"], tuple[int, str])
+        defaulter = create_tuple_defaulter([lambda: 1, lambda: "hello"], tuple[int, str])
         result = defaulter()
         assert result == (1, "hello")
 
     def test_tuple_defaulter_empty(self):
         """Test tuple_defaulter with no inner defaulters."""
-        defaulter = tuple_defaulter([], tuple)
+        defaulter = create_tuple_defaulter([], tuple)
         result = defaulter()
         assert not result
 

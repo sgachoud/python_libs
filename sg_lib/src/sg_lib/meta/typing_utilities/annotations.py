@@ -47,6 +47,8 @@ from typing import (
     Any,
     Callable,
     Union,
+    Final,
+    ClassVar,
     get_args,
     get_origin,
     get_type_hints,
@@ -166,49 +168,6 @@ def union_validator(
 
     return validator
 
-def tuple_validator(
-    inner_validators: list[Validator], _: Any
-) -> Validator:
-    """Create a tuple validator from inner validators."""
-    def validator(vs: Any) -> ValidationLevel:
-        if not isinstance(vs, tuple) or len(vs) != len(inner_validators):  # type: ignore
-            return ValidationLevel.NONE
-        r = reduce(
-            _vl_and, map(lambda f, v: f(v), inner_validators, vs), ValidationLevel.FULL  # type: ignore
-        )
-        return ValidationLevel(r) or ValidationLevel.PARTIAL
-
-    return validator
-
-
-def iterable_validator_from_type[T](
-    it_type: type[Iterable[T]], inner_validators: list[Validator], _: Any
-) -> Validator:
-    """Create a iterable validator creator from inner validators."""
-    def validator(vs: Any) -> ValidationLevel:
-        if not isinstance(vs, it_type):
-            return ValidationLevel.NONE
-        r = reduce(
-            _vl_and, map(inner_validators[0], vs), ValidationLevel.FULL  # type: ignore
-        )
-        return ValidationLevel(r) or ValidationLevel.PARTIAL
-
-    return validator
-
-
-def list_validator(
-    inner_validators: list[Validator], _: Any
-) -> Validator:
-    """Create a list validator from an inner validator."""
-    return iterable_validator_from_type(list, inner_validators, _)
-
-
-def tuple_defaulter(
-    inner_defaulters: list[Defaulter], _: Any
-) -> Callable[[], tuple[Any, ...]]:
-    """Create a tuple defaulter from inner defaulters."""
-    return lambda: tuple(inner_defaulter() for inner_defaulter in inner_defaulters)
-
 
 def none_converter(value: Any) -> None:
     """Convert a value to None. Raises an error if the value is not None.
@@ -320,74 +279,6 @@ def union_converter(
     return converter
 
 
-def tuple_converter(
-    inner_converters: list[Converter], orig: Any
-) -> Callable[[Any], tuple[Any, ...]]:
-    """Tuple converter. Converts all element of the iterable to the correct type.
-
-    Args:
-        inner_converters (list[Converter]): Converters for each element.
-        orig (Any): original annotation for error messages.
-        count (int): Number of elements in the tuple.
-
-    Returns:
-        Callable[[Any], tuple[Any, ...]]: A function that converts the provided value to
-                                a tuple with the correct types.
-    """
-
-    count = len(inner_converters)
-    validator = validator_from_annotation(orig)
-
-    def converter(value: Any) -> tuple[Any, ...]:
-        if len(value) != count:
-            raise ConvertingToAnnotationTypeError(
-                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'. Size mismatch."
-            )
-        if validator(value) == ValidationLevel.FULL:
-            return value
-        try:
-            res = tuple(
-                inner_converter(v)
-                for inner_converter, v in zip(inner_converters, value)
-            )
-        except Exception as e:
-            raise ConvertingToAnnotationTypeError(
-                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'."
-            ) from e
-        return res
-
-    return converter
-
-
-def list_converter(
-    inner_converters: list[Converter], orig: Any
-) -> Callable[[Any], list[Any]]:
-    """List converter. Converts all element of the iterable to the correct type.
-
-    Args:
-        inner_converters (list[Converter]): the converter for each element.
-                                                       Should be a list of length 1.
-        orig (Any): original annotation for error messages.
-
-    Returns:
-        Callable[[Any], list[Any]]: A function that converts the provided value to
-                                a list with the correct type.
-    """
-    validator = validator_from_annotation(orig)
-
-    def converter(value: Any) -> list[Any]:
-        if validator(value) == ValidationLevel.FULL:
-            return value
-        try:
-            return list(map(inner_converters[0], value))
-        except Exception as e:
-            raise ConvertingToAnnotationTypeError(
-                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'."
-            ) from e
-
-    return converter
-
-
 class TypeRegistry:
     """
     Static class to add custom type behavior to the annotations validation, defaulting and
@@ -465,7 +356,7 @@ class TypeRegistry:
     def register_validator_creator[T](
         self,
         special_type: type[T],
-        creator: Callable[[list[Validator], Any], Callable[[Any], bool]],
+        creator: Callable[[list[Validator], Any], Validator],
     ) -> None:
         """
         Register a custom type validator creator for a specific type. This allows the annotations
@@ -804,19 +695,11 @@ def validator_from_annotation(annotation: Any) -> Validator:
             [validator_from_annotation(arg) for arg in get_args(annotation)],
             annotation,
         )
+    
+    # Egg cracking type wrappers are special cases.
+    if origin in {Final, ClassVar}:
+        return validator_from_annotation(get_args(annotation)[0])
 
-    # Tuple is another special case. All its elements must be validated with a specific validator.
-    if origin is tuple:
-        return tuple_validator(
-            [validator_from_annotation(arg) for arg in get_args(annotation)],
-            annotation,
-        )
-
-    if origin is list:
-        return list_validator(
-            [validator_from_annotation(arg) for arg in get_args(annotation)],
-            annotation,
-        )
     return validator_from_annotation(origin)
 
 @overload
@@ -901,12 +784,10 @@ def defaulter_from_annotation(annotation: Any) -> Callable[[], Any]:
         # The user should always put the type that should be the default first.
         return defaulter_from_annotation(get_args(annotation)[0])  # type: ignore todo: fix
 
-    # Tuple is another special case. All its elements must be defaulted.
-    if origin is tuple:
-        return tuple_defaulter(
-            [defaulter_from_annotation(arg) for arg in get_args(annotation)],  # type: ignore todo: fix
-            annotation,
-        )
+    # Egg cracking type wrappers are special cases.
+    if origin in {Final, ClassVar}:
+        return defaulter_from_annotation(get_args(annotation)[0])
+
     return defaulter_from_annotation(origin)  # type: ignore todo: fix
 
 
@@ -991,28 +872,12 @@ def _create_value_to_annotation_converter(
             ],
             annotation,
         )
+    
+    # Egg cracking type wrappers are special cases.
+    if origin in {Final, ClassVar}:
+        return _create_value_to_annotation_converter(get_args(annotation)[0], first_in_union)
 
     # Note: Further special cases could be added to the __custom_type_converter_creators_register.
-
-    # Tuple is another special case.
-    if origin is tuple:
-        return tuple_converter(
-            [
-                _create_value_to_annotation_converter(arg, first_in_union)
-                for arg in get_args(annotation)
-            ],
-            annotation,
-        )
-
-    # List is another special case.
-    if origin is list:
-        return list_converter(
-            [
-                _create_value_to_annotation_converter(arg, first_in_union)
-                for arg in get_args(annotation)
-            ],
-            annotation,
-        )
 
     # Try to use origin as annotation.
     return _create_value_to_annotation_converter(origin, first_in_union)
@@ -1075,3 +940,124 @@ def convert_value_to_annotation(
         Any: the value converted to the provided annotation.
     """
     return converter_from_annotation(annotation, first_in_union)(value)
+
+# Register a few known types
+
+tr = type_registry()
+
+
+def create_tuple_validator(
+    inner_validators: list[Validator], _: Any
+) -> Validator:
+    """Create a tuple validator from inner validators."""
+    def validator(vs: Any) -> ValidationLevel:
+        if not isinstance(vs, tuple) or len(vs) != len(inner_validators):  # type: ignore
+            return ValidationLevel.NONE
+        r = reduce(
+            _vl_and, map(lambda f, v: f(v), inner_validators, vs), ValidationLevel.FULL  # type: ignore
+        )
+        return ValidationLevel(r) or ValidationLevel.PARTIAL
+
+    return validator
+
+
+def iterable_validator_creator_from_type[T](
+    it_type: type[Iterable[T]]
+) -> Callable[[list[Validator], Any], Validator]:
+    """Create a iterable validator creator from inner validators."""
+    def inner(inner_validators: list[Validator], _: Any) -> Validator:
+        def validator(vs: Any) -> ValidationLevel:
+            if not isinstance(vs, it_type):
+                return ValidationLevel.NONE
+            r = reduce(
+                _vl_and, map(inner_validators[0], vs), ValidationLevel.FULL  # type: ignore
+            )
+            return ValidationLevel(r) or ValidationLevel.PARTIAL
+
+        return validator
+    return inner
+
+
+def create_tuple_defaulter(
+    inner_defaulters: list[Defaulter], _: Any
+) -> Callable[[], tuple[Any, ...]]:
+    """Create a tuple defaulter from inner defaulters."""
+    return lambda: tuple(inner_defaulter() for inner_defaulter in inner_defaulters)
+
+
+def create_tuple_converter(
+    inner_converters: list[Converter], orig: Any
+) -> Callable[[Any], tuple[Any, ...]]:
+    """Tuple converter. Converts all element of the iterable to the correct type.
+
+    Args:
+        inner_converters (list[Converter]): Converters for each element.
+        orig (Any): original annotation for error messages.
+        count (int): Number of elements in the tuple.
+
+    Returns:
+        Callable[[Any], tuple[Any, ...]]: A function that converts the provided value to
+                                a tuple with the correct types.
+    """
+
+    count = len(inner_converters)
+    validator = validator_from_annotation(orig)
+
+    def converter(value: Any) -> tuple[Any, ...]:
+        if len(value) != count:
+            raise ConvertingToAnnotationTypeError(
+                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'. Size mismatch."
+            )
+        if validator(value) == ValidationLevel.FULL:
+            return value
+        try:
+            res = tuple(
+                inner_converter(v)
+                for inner_converter, v in zip(inner_converters, value)
+            )
+        except Exception as e:
+            raise ConvertingToAnnotationTypeError(
+                f"Could not convert '{value}' of type '{type(value)}' to '{orig}'."
+            ) from e
+        return res
+
+    return converter
+
+def iterable_converter_creator_from_type[T](it_type: type[T]) -> Callable[[list[Converter], Any], Converter]:
+    """Iterable converter creator. Converts all element of the iterable to the correct type.
+    """
+    
+    def inner(
+        inner_converters: list[Converter], orig: Any
+    ) -> Callable[[Any], T]:
+        validator = validator_from_annotation(orig)
+
+        def converter(value: Any) -> T:
+            if validator(value) == ValidationLevel.FULL:
+                return value
+            try:
+                return it_type(map(inner_converters[0], value)) # type: ignore
+            except Exception as e:
+                raise ConvertingToAnnotationTypeError(
+                    f"Could not convert '{value}' of type '{type(value)}' to '{orig}'."
+                ) from e
+
+        return converter
+    return inner
+
+# tuple
+tr.register_validator_creator(tuple, create_tuple_validator)
+tr.register_defaulter_creator(tuple, create_tuple_defaulter)
+tr.register_converter_creator(tuple, create_tuple_converter)
+
+# list
+tr.register_validator_creator(list, iterable_validator_creator_from_type(list))
+tr.register_converter_creator(list, iterable_converter_creator_from_type(list))
+
+# set
+tr.register_validator_creator(set, iterable_validator_creator_from_type(set))
+tr.register_converter_creator(set, iterable_converter_creator_from_type(set))
+
+# dict
+
+# TODO: dict, Callable, Literal, See also for constants to not coerce if annotations does not know how.
