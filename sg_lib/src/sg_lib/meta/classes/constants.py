@@ -32,12 +32,12 @@ Description: This module provides tools to create namespaces (class) of constant
 __author__ = "Sébastien Gachoud"
 __license__ = "MIT"
 
-from collections.abc import Iterable
-from typing import Any, NoReturn, Callable, ClassVar
+from collections.abc import Iterator
+from typing import Any, NoReturn, Callable, ClassVar, dataclass_transform
 from ...abstract.exceptions.traced_exceptions import TracedException
-from ..typing_utilities.annotations import (
-    resolve_annotation_types,
-    convert_value_to_annotation,
+from ..typing_utilities.utilities import resolve_annotation_types
+from ..typing_utilities.annotations_processors.processors import (
+    annotation_registry,
 )
 
 
@@ -90,7 +90,7 @@ def _instantiation_error(name: str) -> Callable[[Any], NoReturn]:
 
 
 def _verify_annotations_and_coerce(
-    name: str, namespace: dict[str, Any], first_in_union: bool
+    name: str, namespace: dict[str, Any]
 ) -> None:
     """Verify that no annotated member value is missing and coerce all annotated type.
 
@@ -114,8 +114,9 @@ def _verify_annotations_and_coerce(
 
             # coerce type
             try:
-                namespace[key] = convert_value_to_annotation(
-                    namespace[key], annotations[key], first_in_union
+                registry = annotation_registry()
+                namespace[key] = registry.convert_to_annotation(
+                    annotations[key], namespace[key]
                 )
             except Exception as e:
                 raise ConstantsCompositionError(
@@ -123,8 +124,7 @@ def _verify_annotations_and_coerce(
                     f"for constant '{key}' in class '{name}': {e}"
                 ) from e
 
-
-class _ConstantsMetaclass(type):
+class ConstantsMetaclass(type):
     __constants__: tuple[str, ...]
 
     def __new__(
@@ -133,8 +133,7 @@ class _ConstantsMetaclass(type):
         bases: tuple[type, ...],
         namespace: dict[str, Any],
         /,
-        allow_private: bool = True,
-        first_in_union: bool = False,
+        allow_private: bool = False,
         **kwargs: Any,
     ) -> Any:
 
@@ -157,7 +156,7 @@ class _ConstantsMetaclass(type):
 
         # add superclasses names
         for base in bases:
-            if isinstance(base, _ConstantsMetaclass) and reversed(base.__constants__):
+            if isinstance(base, ConstantsMetaclass) and reversed(base.__constants__):
                 constants_names = list(base.__constants__)
                 existing = set(base.__constants__)
                 constants_names.extend(
@@ -166,7 +165,7 @@ class _ConstantsMetaclass(type):
                 namespace["__constants__"] = tuple(constants_names)
 
         # verify that no annotated member is missing and coerce annotated types.
-        _verify_annotations_and_coerce(name, namespace, first_in_union)
+        _verify_annotations_and_coerce(name, namespace)
 
         cls = super().__new__(mcs, name, bases, namespace, **kwargs)
         return cls
@@ -182,7 +181,7 @@ class _ConstantsMetaclass(type):
         constants = ", ".join(f"{k}={getattr(cls, k)!r}" for k in cls.__constants__)
         return f"<ConstantNamespace {cls.__name__}({constants})>"
 
-    def __iter__(cls) -> Iterable[str]:
+    def __iter__(cls) -> Iterator[str]:
         return iter(cls.__constants__)
 
     def __contains__(cls, name: str) -> bool:
@@ -214,12 +213,12 @@ class _ConstantsMetaclass(type):
         return name in cls.__constants__
 
 
-class ConstantNamespace(metaclass=_ConstantsMetaclass, allow_private=False):
+class ConstantNamespace(metaclass=ConstantsMetaclass, allow_private=False):
     """Base class to create namespaces (class) of constants.
     Examples:
         >>> class MyConstants(ConstantNamespace):
         ...    A = 1 # this is not a constant. It needs annotation.
-        ...    _A: int = 1 # this is a constant unless allow_private=False.
+        ...    _A: int = 1 # this is not a constant unless allow_private=True.
         ...    B: int = 2 # this is a constant.
         ...    C: int = 3.4 # will result in 3. Values are coerced.
         ...    path: pathlib.Path = "documents/test.txt" # coerced to a Path.
