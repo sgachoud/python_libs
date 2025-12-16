@@ -33,7 +33,7 @@ __author__ = "Sébastien Gachoud"
 __license__ = "MIT"
 
 from collections.abc import Iterator
-from typing import Any, NoReturn, Callable, ClassVar, dataclass_transform
+from typing import Any, NoReturn, Callable, ClassVar
 from ...abstract.exceptions.traced_exceptions import TracedException
 from ..typing_utilities.utilities import resolve_annotation_types
 from ..typing_utilities.annotations_processors.processors import (

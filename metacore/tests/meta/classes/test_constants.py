@@ -40,7 +40,7 @@ from typing import Any, Final, ClassVar, Optional
 
 import pytest
 
-from sg_lib.src.sg_lib.meta.classes.constants import (
+from metacore.src.metacore.meta.classes.constants import (
     ConstantNamespace,
     ConstantsCompositionError,
     ConstantsInstantiationError,

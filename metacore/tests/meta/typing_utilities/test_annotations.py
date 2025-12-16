@@ -39,12 +39,12 @@ from types import NoneType
 
 import pytest
 
-from sg_lib.src.sg_lib.meta.typing_utilities.annotations_processors.errors import (
+from metacore.src.metacore.meta.typing_utilities.annotations_processors.errors import (
     TypingError,
     DefaultingAnnotationError,
     ConvertingToAnnotationTypeError,
 )
-from sg_lib.src.sg_lib.meta.typing_utilities.annotations_processors.processors import (
+from metacore.src.metacore.meta.typing_utilities.annotations_processors.processors import (
     AnnotationsRegistery,
     AnnotationEntry,
     ValidationLevel,
@@ -56,7 +56,7 @@ from sg_lib.src.sg_lib.meta.typing_utilities.annotations_processors.processors i
     vl_and,
     vl_or,
 )
-from sg_lib.src.sg_lib.meta.typing_utilities.utilities import (
+from metacore.src.metacore.meta.typing_utilities.utilities import (
     is_union,
     is_optional,
     is_binary_optional,
