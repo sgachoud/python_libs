@@ -40,13 +40,16 @@ from typing import Any, Final, ClassVar, Optional
 
 import pytest
 
-from metacore.src.metacore.meta.classes.constants import (
+from metacore.src.metacore.constants import (
     ConstantNamespace,
     ConstantsCompositionError,
     ConstantsInstantiationError,
     ConstantsModificationError,
-    _instantiation_error,
-    _verify_functions,
+)
+
+from metacore.src.metacore.meta.classes.constants import (
+    _instantiation_error, # type: ignore
+    _verify_functions, # type: ignore
 )
 
 
@@ -693,7 +696,7 @@ class TestConstantNamespaceIntegration:
                 2: [("3", "world")],
             }  # type: ignore
 
-        expected = {"1": [(1, "hello"), (2, None)], "2": [(3, "world")]}
+        expected: dict[str, Any] = {"1": [(1, "hello"), (2, None)], "2": [(3, "world")]}
         assert TestConstants.complex_nested == expected
 
     def test_all_type_features_combined(self):

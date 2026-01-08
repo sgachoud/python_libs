@@ -39,7 +39,7 @@ from .errors import ConvertingToAnnotationTypeError
 from .processors import (
     Annotation,
     AnnotationEntry,
-    AnnotationsRegistery,
+    AnnotationsRegistry,
     Converter,
     Defaulter,
     ValidationLevel,
@@ -77,7 +77,7 @@ class CastTypeAnnotationEntry(AnnotationEntry):
         self,
         inner_defaulter: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery, /
+        _registry: AnnotationsRegistry, /
     ) -> Defaulter | NotImplementedType:
         return inner_defaulter[0]
 
@@ -85,7 +85,7 @@ class CastTypeAnnotationEntry(AnnotationEntry):
         self,
         inner_converters: list[Converter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery, /
+        _registry: AnnotationsRegistry, /
     ) -> Converter | NotImplementedType:
         return inner_converters[0]
 
@@ -121,7 +121,7 @@ class TupleAnnotationEntry(AnnotationEntry):
         self,
         inner_validators: list[Validator],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         """Create a tuple validator from inner validators."""
@@ -142,7 +142,7 @@ class TupleAnnotationEntry(AnnotationEntry):
         self,
         inner_defaulters: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         """Create a tuple defaulter from inner defaulters."""
@@ -152,7 +152,7 @@ class TupleAnnotationEntry(AnnotationEntry):
         self,
         inner_converters: list[Converter],
         annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         count = len(inner_converters)
@@ -190,7 +190,7 @@ class DynamicContainerAnnotationEntry[T: type](AnnotationEntry):
         self,
         inner_validators: list[Validator],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         def validator(vs: Any) -> ValidationLevel:
@@ -205,7 +205,7 @@ class DynamicContainerAnnotationEntry[T: type](AnnotationEntry):
         self,
         _inner_defaulters: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         return self._sequence_type
@@ -214,7 +214,7 @@ class DynamicContainerAnnotationEntry[T: type](AnnotationEntry):
         self,
         inner_converters: list[Converter],
         annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         """Iterable converter creator. Converts all element of the iterable to the correct type."""
@@ -256,7 +256,7 @@ class EggCrackingAnnotationEntry(AnnotationEntry):
         self,
         inner_validators: list[Validator],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         return inner_validators[0]
@@ -265,7 +265,7 @@ class EggCrackingAnnotationEntry(AnnotationEntry):
         self,
         inner_defaulters: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         return inner_defaulters[0]
@@ -274,7 +274,7 @@ class EggCrackingAnnotationEntry(AnnotationEntry):
         self,
         inner_converters: list[Converter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         return inner_converters[0]
@@ -292,7 +292,7 @@ class DictAnnotationEntry(AnnotationEntry):
         self,
         inner_validators: list[Validator],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         def validator(vs: Any) -> ValidationLevel:
@@ -312,7 +312,7 @@ class DictAnnotationEntry(AnnotationEntry):
         self,
         _inner_defaulters: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         return dict
@@ -321,7 +321,7 @@ class DictAnnotationEntry(AnnotationEntry):
         self,
         inner_converters: list[Converter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         def converter(value: Any) -> dict[Any, Any]:
@@ -345,7 +345,7 @@ class LiteralAnnotationEntry(AnnotationEntry):
         self,
         inner_validators: list[Validator],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         def validator(v: Any) -> ValidationLevel:
@@ -358,7 +358,7 @@ class LiteralAnnotationEntry(AnnotationEntry):
         self,
         inner_defaulters: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         return lambda: inner_defaulters[0]
@@ -367,7 +367,7 @@ class LiteralAnnotationEntry(AnnotationEntry):
         self,
         inner_converters: list[Converter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         def converter(value: Any) -> Any:
@@ -400,7 +400,7 @@ class CallableAnnotationEntry(AnnotationEntry):
         self,
         inner_validators: list[Validator],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         """Create a validator for Callable types."""
@@ -415,7 +415,7 @@ class CallableAnnotationEntry(AnnotationEntry):
         self,
         _inner_defaulters: list[Defaulter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         """Callable types don't have a default value."""
@@ -425,7 +425,7 @@ class CallableAnnotationEntry(AnnotationEntry):
         self,
         _inner_converters: list[Converter],
         _annotation: Annotation,
-        _registry: AnnotationsRegistery,
+        _registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         """Callable types can't be converted."""

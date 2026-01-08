@@ -39,24 +39,23 @@ from types import NoneType
 
 import pytest
 
-from metacore.src.metacore.meta.typing_utilities.annotations_processors.errors import (
+from metacore.src.metacore.annotations_processors import (
     TypingError,
     DefaultingAnnotationError,
     ConvertingToAnnotationTypeError,
-)
-from metacore.src.metacore.meta.typing_utilities.annotations_processors.processors import (
-    AnnotationsRegistery,
+    AnnotationsRegistry,
     AnnotationEntry,
     ValidationLevel,
     annotation_registry,
     validator_from_annotation,
     defaulter_from_annotation,
     default_from_annotation,
-    convert_to_annotation,
+    convert_to_annotation,)
+from metacore.src.metacore.meta.typing.annotations_processors.processors import (
     vl_and,
     vl_or,
 )
-from metacore.src.metacore.meta.typing_utilities.utilities import (
+from metacore.src.metacore.utilities import (
     is_union,
     is_optional,
     is_binary_optional,
@@ -454,7 +453,7 @@ class TestRegistrySingleton:
     def test_registry_is_annotations_registery(self):
         """Test that registry is correct type."""
         registry = annotation_registry()
-        assert isinstance(registry, AnnotationsRegistery)
+        assert isinstance(registry, AnnotationsRegistry)
 
 
 class TestCustomTypeRegistration:
@@ -534,7 +533,7 @@ class TestIntegration:
     def test_deeply_nested_conversion(self):
         """Test deeply nested type conversion."""
         complex_type = dict[str, list[tuple[int, Optional[str]]]]
-        input_data = {1: [("1", "hello"), ("2", None)], 2: [("3", "world")]}
+        input_data: dict[int, Any] = {1: [("1", "hello"), ("2", None)], 2: [("3", "world")]}
         result = convert_to_annotation(complex_type, input_data)
 
         assert result == {"1": [(1, "hello"), (2, None)], "2": [(3, "world")]}

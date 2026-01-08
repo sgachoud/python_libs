@@ -158,7 +158,7 @@ def type_converter[T](c_type: type[T]) -> Callable[[Any], T]:
 def union_converter(
     inner_converters: Generator[Converter],
     orig: Annotation,
-    registry: AnnotationsRegistery,
+    registry: AnnotationsRegistry,
 ) -> Converter:
     """Union converter. Try inner types conversion in order unless the value is already of a type
     of the union. Partial matches are tested first.
@@ -224,7 +224,7 @@ class AnnotationEntry:
     def raw_create_validator(
         self,
         annotation: Annotation,
-        registry: AnnotationsRegistery,
+        registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         """Usually kept for private use. Can be overriden by sub-classes instead of
@@ -248,7 +248,7 @@ class AnnotationEntry:
     def raw_create_defaulter(
         self,
         annotation: Annotation,
-        registry: AnnotationsRegistery,
+        registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         """Usually kept for private use. Can be overriden by sub-classes instead of
@@ -272,7 +272,7 @@ class AnnotationEntry:
     def raw_create_converter(
         self,
         annotation: Annotation,
-        registry: AnnotationsRegistery,
+        registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         """Usually kept for private use. Can be overriden by sub-classes instead of
@@ -297,7 +297,7 @@ class AnnotationEntry:
         self,
         inner_validators: list[Validator],
         annotation: Annotation,
-        registry: AnnotationsRegistery,
+        registry: AnnotationsRegistry,
         /,
     ) -> Validator | NotImplementedType:
         """Create a validator for the annotation.
@@ -316,7 +316,7 @@ class AnnotationEntry:
         self,
         inner_defaulter: list[Defaulter],
         annotation: Annotation,
-        registry: AnnotationsRegistery,
+        registry: AnnotationsRegistry,
         /,
     ) -> Defaulter | NotImplementedType:
         """Create a defaulter for the annotation.
@@ -335,7 +335,7 @@ class AnnotationEntry:
         self,
         inner_converters: list[Converter],
         annotation: Annotation,
-        registry: AnnotationsRegistery,
+        registry: AnnotationsRegistry,
         /,
     ) -> Converter | NotImplementedType:
         """Create a converter for the annotation.
@@ -463,7 +463,7 @@ class HousingAnnotationEntry(AnnotationEntry):
         )
 
 
-class AnnotationsRegistery:
+class AnnotationsRegistry:
     """
     A class to hold all the processors, and processors creator for annotations. It allows
     customization.
@@ -1025,14 +1025,14 @@ class AnnotationsRegistery:
 
 
 @lru_cache(1)
-def annotation_registry() -> AnnotationsRegistery:
+def annotation_registry() -> AnnotationsRegistry:
     """Default annotation registry. Allows to register custom type defaulters and converters.
     See AnnotationRegistery for more information.
 
     Returns:
         TypeRegistry: the type registry instance.
     """
-    return AnnotationsRegistery()
+    return AnnotationsRegistry()
 
 
 def validator_from_annotation(annotation: Annotation) -> Validator:

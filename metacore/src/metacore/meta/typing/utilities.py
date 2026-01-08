@@ -1,4 +1,8 @@
-"""TODO
+"""Type annotation utility functions.
+
+This module provides helper functions for working with Python type annotations,
+including utilities for checking union types, optional types, and resolving
+forward references in annotations.
 """
 from typing import Any, Union, get_origin, get_args, get_type_hints
 from types import UnionType, NoneType
