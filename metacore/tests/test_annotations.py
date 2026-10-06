@@ -388,8 +388,9 @@ class TestErrorHandling:
             def __init__(self, required_arg: Any):
                 self.required_arg = required_arg
 
+        factory = defaulter_from_annotation(UnsupportedType)
         with pytest.raises(DefaultingAnnotationError):
-            defaulter_from_annotation(UnsupportedType)
+            factory()
 
 
 class TestRegistrySingleton:

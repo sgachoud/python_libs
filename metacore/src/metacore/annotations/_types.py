@@ -33,6 +33,9 @@ class ValidationLevel(IntEnum):
     PARTIAL: The value matches the top level annotation. For example, [1, "2"] matches partialy
         list[str] because it is a list but it does not contains only strings. ("1", "2") does not
         match because it is not a list.
+
+    FULL and PARTIAL are both truthy. Compare with FULL, or use
+    fully_matches_annotation, when partial matches must be rejected.
     """
 
     NONE = 0

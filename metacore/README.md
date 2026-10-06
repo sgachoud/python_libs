@@ -28,6 +28,7 @@ from metacore import (
     default_from_annotation,
     defaulter_from_annotation,
     validate_from_annotation,
+    fully_matches_annotation,
     validator_from_annotation,
 )
 ```
@@ -83,6 +84,59 @@ keyword-only `nglobals` and `nlocals`. Registry cache-clearing methods accept th
 as well. Names are resolved for each call; namespaces are not stored on the shared
 registry. Constant namespaces supply their declaring module and class namespaces
 automatically.
+
+### Processing contracts
+
+Unsupported parameterized annotations raise `AnnotationProcessorError` rather
+than silently ignoring their type arguments. Registered handlers can extend
+the supported annotations.
+
+`Annotated[T, metadata]` keeps its metadata during resolution. A processor
+registered for that exact annotation takes precedence; other operations fall
+back to `T`. Metadata without a registered processor does not add validation
+rules. Unhashable metadata is accepted for this fallback but is not cached.
+
+Plain aliases (`type Items = list[int]`) and specialized generic aliases
+(`type Items[T] = list[T]`, used as `Items[int]`) resolve to their underlying
+annotations. Generic aliases require all declared type arguments explicitly.
+An exact alias-specific registration takes precedence over its underlying type.
+Recursive aliases are rejected with `AnnotationProcessorError`, including when
+requesting a default for an empty container or a union with a nonrecursive first
+branch. Finite nesting, such as `Items[Items[int]]`, is supported.
+
+Both fixed tuples (`tuple[int, str]`) and variadic tuples (`tuple[int, ...]`)
+are supported. Variadic tuples default to `()`. Lists, sets, and dictionaries
+default to empty containers without constructing or defaulting their elements.
+
+Looking up a default factory does not construct an instance. Construction occurs
+when the factory is called, and constructor failures raise
+`DefaultingAnnotationError` with the original exception as their cause.
+
+Each registry caches successfully created validators, converters, and default
+factories. Registration or replacement of any processor clears the entire cache.
+All cache-clearing methods also clear the entire cache, including processors for
+containing annotations. Already-returned callables are not rewritten; request
+new callables after changing the registry. After directly mutating an entry
+obtained through `get_processor()`, call `clear_cache()` explicitly.
+
+Validation returns either a boolean or `ValidationLevel`. Both `FULL` and
+`PARTIAL` are truthy; `PARTIAL` means only the outer container matches. For a
+boolean full match, use `fully_matches_annotation(annotation, value)`, also
+available on `AnnotationsRegistry`. It returns `False` for partial matches and
+mismatches; unsupported annotations still raise an error.
+
+```python
+from metacore import fully_matches_annotation
+
+assert fully_matches_annotation(list[int], [1, 2]) is True
+assert fully_matches_annotation(list[int], [1, "2"]) is False
+```
+
+Literal conversion preserves a matching value and otherwise returns the first
+declared literal. For example, converting `"unknown"` to `Literal["a", "b"]`
+returns `"a"`. Literal matching currently uses Python equality, so `True` matches
+`Literal[1]`. The full-match helper follows that same validator contract; it does
+not introduce stricter Literal matching.
 
 ## Features
 

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from functools import reduce
 from types import EllipsisType, NotImplementedType, NoneType
-from typing import Self, Any, ClassVar, Final, Literal, TYPE_CHECKING, get_args
+from typing import Self, Any, Callable, ClassVar, Final, Literal, TYPE_CHECKING, get_args
 
 from ..exceptions import ConvertingToAnnotationTypeError
 from ..typing import Annotation
@@ -90,6 +90,22 @@ class AnyAnnotationEntry(AnnotationEntry):
 class TupleAnnotationEntry(AnnotationEntry):
     """Tuple annotation entry. Provides a validator, defaulter and converter creators for tuples."""
 
+    def raw_create_defaulter(
+        self, annotation: Annotation, registry: AnnotationsRegistry, /
+    ) -> Defaulter | NotImplementedType:
+        """A variadic tuple defaults to empty without defaulting its element type."""
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return tuple
+        return super().raw_create_defaulter(annotation, registry)
+
+    def prepare_inner(self, annotation: Annotation, f: Callable[[Any], Any]) -> Any:
+        """The ellipsis in a variadic tuple repeats its element annotation."""
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return [f(args[0])]
+        return super().prepare_inner(annotation, f)
+
     def create_validator(
         self,
         inner_validators: list[Validator],
@@ -98,9 +114,16 @@ class TupleAnnotationEntry(AnnotationEntry):
         /,
     ) -> Validator | NotImplementedType:
         """Create a tuple validator from inner validators."""
+        args = get_args(_annotation)
+        variadic = len(args) == 2 and args[1] is Ellipsis
 
         def validator(vs: Any) -> ValidationLevel:
-            if not isinstance(vs, tuple) or len(vs) != len(inner_validators):
+            if not isinstance(vs, tuple):
+                return ValidationLevel.NONE
+            if variadic:
+                r = reduce(vl_and, map(inner_validators[0], vs), ValidationLevel.FULL)
+                return ValidationLevel(r) or ValidationLevel.PARTIAL
+            if len(vs) != len(inner_validators):
                 return ValidationLevel.NONE
             r = reduce(
                 vl_and,
@@ -129,9 +152,20 @@ class TupleAnnotationEntry(AnnotationEntry):
         /,
     ) -> Converter | NotImplementedType:
         count = len(inner_converters)
+        args = get_args(annotation)
+        variadic = len(args) == 2 and args[1] is Ellipsis
         validator = _registry.validator_from_annotation(annotation)
 
         def converter(value: Any) -> tuple[Any, ...]:
+            if variadic:
+                if validator(value) == ValidationLevel.FULL:
+                    return value
+                try:
+                    return tuple(map(inner_converters[0], value))
+                except Exception as error:
+                    raise ConvertingToAnnotationTypeError(
+                        f"Could not convert {value!r} to '{annotation}'."
+                    ) from error
             if len(value) != count:
                 raise ConvertingToAnnotationTypeError(
                     f"Could not convert '{value}' of type '{type(value)}' to '{annotation}'. Size"
@@ -157,6 +191,12 @@ class DynamicContainerAnnotationEntry[T: type](AnnotationEntry):
     def __init__(self, sequence_type: T) -> NoneType:
         super().__init__()
         self._sequence_type = sequence_type
+
+    def raw_create_defaulter(
+        self, annotation: Annotation, registry: AnnotationsRegistry, /
+    ) -> Defaulter | NotImplementedType:
+        """An empty container does not require a default for its element type."""
+        return self.create_defaulter([], annotation, registry)
 
     def create_validator(
         self,
@@ -256,6 +296,12 @@ class EggCrackingAnnotationEntry(AnnotationEntry):
 class DictAnnotationEntry(AnnotationEntry):
     """Dict annotation entry. Provides a validator, defaulter and converter creators for dicts."""
 
+    def raw_create_defaulter(
+        self, annotation: Annotation, registry: AnnotationsRegistry, /
+    ) -> Defaulter | NotImplementedType:
+        """An empty dictionary needs neither key nor value defaults."""
+        return self.create_defaulter([], annotation, registry)
+
     def create_validator(
         self,
         inner_validators: list[Validator],
@@ -304,7 +350,11 @@ class DictAnnotationEntry(AnnotationEntry):
 
 # Literal
 class LiteralAnnotationEntry(AnnotationEntry):
-    """Literal annotation entry. Provides a validator, defaulter and converter creators for literals."""
+    """Literal annotation entry. Provides a validator, defaulter and converter creators for literals.
+
+    Matching uses Python equality, including True == 1. Conversion preserves a
+    matching input; otherwise it returns the first literal, also used as the default.
+    """
     def prepare_inner(self, annotation: Annotation, f: Any):
         return get_args(annotation)
 

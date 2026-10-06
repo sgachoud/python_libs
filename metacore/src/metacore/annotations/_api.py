@@ -72,8 +72,24 @@ def validate_from_annotation(
     nglobals: dict[str, Any] | None = None,
     nlocals: dict[str, Any] | None = None,
 ) -> bool | ValidationLevel:
-    """This function is a shortcut to `annotation_registry().validate_with_annotation()`."""
+    """This function is a shortcut to `annotation_registry().validate_with_annotation()`.
+
+    PARTIAL is truthy. Use fully_matches_annotation for a boolean full match.
+    """
     return annotation_registry().validate_with_annotation(
+        annotation, value, nglobals=nglobals, nlocals=nlocals
+    )
+
+
+def fully_matches_annotation(
+    annotation: Annotation,
+    value: Any,
+    *,
+    nglobals: dict[str, Any] | None = None,
+    nlocals: dict[str, Any] | None = None,
+) -> bool:
+    """Return a boolean full match; partial matches are False, errors still raise."""
+    return annotation_registry().fully_matches_annotation(
         annotation, value, nglobals=nglobals, nlocals=nlocals
     )
 

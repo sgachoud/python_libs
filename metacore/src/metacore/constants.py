@@ -187,6 +187,12 @@ class ConstantsMetaclass(type):
             " class cannot be modified."
         )
 
+    def __delattr__(cls, name: str) -> NoReturn:
+        raise ConstantsModificationError(
+            f"Attribute '{name}' of class '{cls.__name__}' cannot be deleted. Reason: Constant"
+            " class cannot be modified."
+        )
+
     def __repr__(cls) -> str:
         """Returns a string representation of the class."""
         constants = ", ".join(f"{k}={getattr(cls, k)!r}" for k in cls.__constants__)

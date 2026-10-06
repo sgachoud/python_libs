@@ -19,6 +19,7 @@ from .annotations import (
     defaulter_from_annotation,
     converter_from_annotation,
     validate_from_annotation,
+    fully_matches_annotation,
     default_from_annotation,
     convert_to_annotation,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "defaulter_from_annotation",
     "converter_from_annotation",
     "validate_from_annotation",
+    "fully_matches_annotation",
     "default_from_annotation",
     "convert_to_annotation",
     "__version__",

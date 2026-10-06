@@ -207,6 +207,12 @@ class HousingAnnotationEntry(AnnotationEntry):
         self.create_defaulter = defaulter_creator or self.create_defaulter
         self.create_converter = converter_creator or self.create_converter
 
+    def _use_direct_processor(
+        self, _annotation: Annotation, _registry: AnnotationsRegistry, /
+    ) -> NotImplementedType:
+        """A directly replaced operation supersedes its previous creator."""
+        return NotImplemented
+
     def set_validator(self, validator: Validator) -> Self:
         """Set the validator for the annotation processor.
            Can be used as a decorator.
@@ -218,6 +224,7 @@ class HousingAnnotationEntry(AnnotationEntry):
             Self: The annotation processor.
         """
         self.validate = validator
+        self.raw_create_validator = self._use_direct_processor
         return self
 
     def set_defaulter(self, defaulter: Defaulter) -> Self:
@@ -231,6 +238,7 @@ class HousingAnnotationEntry(AnnotationEntry):
             Self: The annotation processor.
         """
         self.default = defaulter
+        self.raw_create_defaulter = self._use_direct_processor
         return self
 
     def set_converter(self, converter: Converter) -> Self:
@@ -244,6 +252,7 @@ class HousingAnnotationEntry(AnnotationEntry):
             Self: The annotation processor.
         """
         self.convert = converter
+        self.raw_create_converter = self._use_direct_processor
         return self
 
     def set_validator_creator(self, validator_creator: ValidatorCreator) -> Self:
@@ -257,6 +266,7 @@ class HousingAnnotationEntry(AnnotationEntry):
             Self: The annotation processor.
         """
         self.create_validator = validator_creator
+        self.raw_create_validator = super().raw_create_validator
         return self
 
     def set_defaulter_creator(self, defaulter_creator: DefaulterCreator) -> Self:
@@ -270,6 +280,7 @@ class HousingAnnotationEntry(AnnotationEntry):
             Self: The annotation processor.
         """
         self.create_defaulter = defaulter_creator
+        self.raw_create_defaulter = super().raw_create_defaulter
         return self
 
     def set_converter_creator(self, converter_creator: ConverterCreator) -> Self:
@@ -283,6 +294,7 @@ class HousingAnnotationEntry(AnnotationEntry):
             Self: The annotation processor.
         """
         self.create_converter = converter_creator
+        self.raw_create_converter = super().raw_create_converter
         return self
 
     @classmethod
@@ -290,7 +302,7 @@ class HousingAnnotationEntry(AnnotationEntry):
         """Create a HousingAnnotationProcessor from an AnnotationProcessor."""
         if not processor:
             return cls()
-        return cls(
+        entry = cls(
             validator=processor.validate,
             defaulter=processor.default,
             converter=processor.convert,
@@ -298,3 +310,8 @@ class HousingAnnotationEntry(AnnotationEntry):
             defaulter_creator=processor.create_defaulter,
             converter_creator=processor.create_converter,
         )
+        entry.prepare_inner = processor.prepare_inner
+        entry.raw_create_validator = processor.raw_create_validator
+        entry.raw_create_defaulter = processor.raw_create_defaulter
+        entry.raw_create_converter = processor.raw_create_converter
+        return entry

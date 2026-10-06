@@ -26,13 +26,14 @@ from __future__ import annotations
 
 from functools import reduce
 from types import NoneType
-from typing import Any, Callable, DefaultDict, Generator, get_args, get_origin
+from typing import Annotated, Any, Callable, DefaultDict, Generator, get_args, get_origin
 
 from ..exceptions import (
     AnnotationProcessorError, ConvertingToAnnotationTypeError,
     DefaultingAnnotationError, TypingError,
 )
 from ..typing import Annotation, is_optional, is_union, resolve_annotation_types
+from ..typing import _expand_type_alias, _reject_recursive_aliases
 from ._entries import AnnotationEntry, HousingAnnotationEntry
 from ._types import (
     Converter, ConverterCreator, Defaulter, DefaulterCreator,
@@ -93,6 +94,14 @@ def type_converter[T](c_type: type[T]) -> Callable[[Any], T]:
             ) from e
 
     return converter
+
+
+def _annotation_cache_key(annotation: Annotation) -> Any:
+    """Preserve nested union order even though Python unions compare unordered."""
+    origin = get_origin(annotation)
+    if origin is not None:
+        return origin, tuple(_annotation_cache_key(arg) for arg in get_args(annotation))
+    return type(annotation), annotation
 
 
 def union_converter(
@@ -172,6 +181,7 @@ class AnnotationsRegistry:
     def __init__(self) -> NoneType:
         self.__processors = {}
         self.__cache = DefaultDict(self.CacheEntry)
+        self.__building: set[tuple[Annotation, str]] = set()
         # Import locally to keep entry definitions independent of registry construction.
         from ._builtins import register_builtins
 
@@ -182,64 +192,52 @@ class AnnotationsRegistry:
         nglobals: dict[str, Any] | None = None,
         nlocals: dict[str, Any] | None = None,
     ) -> None:
-        """Clear the validator cache for a specific annotation.
+        """Resolve the annotation and clear the entire cache, including dependents.
 
         Args:
             annotation (Annotation): The annotation to clear the validator cache for.
         """
-        if annotation in self.__cache:
-            self.__cache[annotation].validator = None
-        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
-        if annotation in self.__cache:
-            self.__cache[annotation].validator = None
+        resolve_annotation_types({"_": annotation}, nglobals, nlocals)
+        self.clear_cache()
 
     def clear_defaulter_cache_for_annotation(
         self, annotation: Annotation, *,
         nglobals: dict[str, Any] | None = None,
         nlocals: dict[str, Any] | None = None,
     ) -> None:
-        """Clear the defaulter cache for a specific annotation.
+        """Resolve the annotation and clear the entire cache, including dependents.
 
         Args:
             annotation (Annotation): The annotation to clear the defaulter cache for.
         """
-        if annotation in self.__cache:
-            self.__cache[annotation].defaulter = None
-        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
-        if annotation in self.__cache:
-            self.__cache[annotation].defaulter = None
+        resolve_annotation_types({"_": annotation}, nglobals, nlocals)
+        self.clear_cache()
 
     def clear_converter_cache_for_annotation(
         self, annotation: Annotation, *,
         nglobals: dict[str, Any] | None = None,
         nlocals: dict[str, Any] | None = None,
     ) -> None:
-        """Clear the converter cache for a specific annotation.
+        """Resolve the annotation and clear the entire cache, including dependents.
 
         Args:
             annotation (Annotation): The annotation to clear the converter cache for.
         """
-        if annotation in self.__cache:
-            self.__cache[annotation].converter = None
-        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
-        if annotation in self.__cache:
-            self.__cache[annotation].converter = None
+        resolve_annotation_types({"_": annotation}, nglobals, nlocals)
+        self.clear_cache()
 
     def clear_cache_for_annotation(
         self, annotation: Annotation, *,
         nglobals: dict[str, Any] | None = None,
         nlocals: dict[str, Any] | None = None,
     ) -> None:
-        """Clear the cache for a specific annotation.
+        """Resolve the annotation and clear the entire cache, including dependents.
 
         Args:
             annotation (Annotation): The annotation to clear the cache for.
         """
-        if annotation in self.__cache:
-            del self.__cache[annotation]
-        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
-        if annotation in self.__cache:
-            del self.__cache[annotation]
+        resolve_annotation_types({"_": annotation}, nglobals, nlocals)
+        self.clear_cache()
 
     def clear_cache(self) -> None:
         """Clear the cache of all annotations. Removes all cached processors."""
@@ -257,7 +255,7 @@ class AnnotationsRegistry:
             processor (AnnotationProcessor): The processor to use for the specified type.
         """
         self.__processors[annotation] = processor
-        self.clear_cache_for_annotation(annotation)
+        self.clear_cache()
 
     def _register_single_processor(
         self, annotation: Annotation, s_processor: Any, setter: Any
@@ -267,7 +265,7 @@ class AnnotationsRegistry:
             processor = HousingAnnotationEntry.from_processor(processor)
             self.register_processor(annotation, processor)
         else:
-            self.clear_cache_for_annotation(annotation)
+            self.clear_cache()
         setter(processor, s_processor)
 
     def register_validator(self, annotation: Annotation, validator: Validator) -> None:
@@ -391,7 +389,10 @@ class AnnotationsRegistry:
             AnnotationProcessor: The processor for the specified annotation or None if no
             processor is registered.
         """
-        return self.__processors.get(annotation)
+        try:
+            return self.__processors.get(annotation)
+        except TypeError:
+            return None
 
     def has_processor(self, annotation: Annotation) -> bool:
         """Check if a processor is registered for a specific annotation.
@@ -408,7 +409,44 @@ class AnnotationsRegistry:
         """Get all registered types for debugging/introspection."""
         return list(self.__processors.keys())
 
+    def _cached_processor(
+        self, annotation: Annotation, operation: str, create: Callable[[Annotation], Any]
+    ) -> Any:
+        """Cache successful processor creation, leaving unhashable metadata uncached."""
+        if not self.__building:
+            _reject_recursive_aliases(annotation)
+        cache_key = _annotation_cache_key(annotation)
+        try:
+            hash(cache_key)
+        except TypeError:
+            return create(annotation)
+        entry = self.__cache[cache_key]
+        cached = getattr(entry, operation)
+        if cached is not None:
+            return cached
+        key = (cache_key, operation)
+        if key in self.__building:
+            raise AnnotationProcessorError(
+                f"Recursive annotation cannot create a {operation}: {annotation}."
+            )
+        self.__building.add(key)
+        try:
+            processor = create(annotation)
+        finally:
+            self.__building.remove(key)
+        setattr(entry, operation, processor)
+        return processor
+
     def __validator_from_annotation(self, annotation: Annotation) -> Validator:
+        return self._cached_processor(annotation, "validator", self._create_validator)
+
+    def __defaulter_from_annotation(self, annotation: Annotation) -> Defaulter:
+        return self._cached_processor(annotation, "defaulter", self._create_defaulter)
+
+    def __converter_from_annotation(self, annotation: Annotation) -> Converter:
+        return self._cached_processor(annotation, "converter", self._create_converter)
+
+    def _create_validator(self, annotation: Annotation) -> Validator:
         """Get the validator for a specific annotation. If a cached value exists, it is returned.
 
         Args:
@@ -419,15 +457,18 @@ class AnnotationsRegistry:
             Validator: The validator, for the specified annotation.
         """
 
-        cache_entry = self.__cache[annotation]
-        if cache_entry.validator:
-            return cache_entry.validator
-
         entry = self.get_processor(annotation)
 
         # Absolute prority to registered validator.
         if entry and entry.validate:
             return entry.validate
+
+        expanded = _expand_type_alias(annotation)
+        if expanded is not annotation:
+            return self.__validator_from_annotation(expanded)
+
+        if get_origin(annotation) is Annotated:
+            return self.__validator_from_annotation(get_args(annotation)[0])
 
         # The annotation might still be a composite type. Composites are not types.
         if isinstance(annotation, type):
@@ -467,9 +508,11 @@ class AnnotationsRegistry:
             )
             return union_validator(inner_validators, annotation)
 
-        return self.__validator_from_annotation(origin)
+        raise AnnotationProcessorError(
+            f"No validator handles the type arguments of annotation: {annotation}."
+        )
 
-    def __defaulter_from_annotation(self, annotation: Annotation) -> Defaulter:
+    def _create_defaulter(self, annotation: Annotation) -> Defaulter:
         """Get the defaulter for a specific annotation.
 
         Args:
@@ -480,30 +523,36 @@ class AnnotationsRegistry:
             Defaulter: The defaulter for the specified annotation.
         """
 
-        cache_entry = self.__cache[annotation]
-        if cache_entry.defaulter:
-            return cache_entry.defaulter
-
         entry = self.get_processor(annotation)
 
         # Absolute prority to registered processors.
         if entry and entry.default:
             return entry.default
 
+        expanded = _expand_type_alias(annotation)
+        if expanded is not annotation:
+            return self.__defaulter_from_annotation(expanded)
+
+        if get_origin(annotation) is Annotated:
+            return self.__defaulter_from_annotation(get_args(annotation)[0])
+
         # The annotation might still be a composite type. Composites are not types.
         if isinstance(annotation, type):
 
             # For the defaulter.
-            try:
-                # ensure it is a valid default call.
-                annotation()
-                return annotation
-            except TypeError as e:
-                # otherwise, raise on request of a defaulter.
-                raise DefaultingAnnotationError(
-                    f"Could not deduce defaulter from annotation: {annotation}."
-                    " {annotation}() is not a valid default call."
-                ) from e
+            def default() -> Any:
+                try:
+                    # ensure it is a valid default call.
+                    return annotation()
+                except Exception as e:
+                    # otherwise, raise on request of a defaulter.
+                    # Construction and any failure are deferred until the factory is invoked.
+                    raise DefaultingAnnotationError(
+                        f"Could not default annotation: {annotation}."
+                        f" {annotation}() failed."
+                    ) from e
+
+            return default
 
         # Retrieve the origin of the annotation. Ex.: Union[int, str] -> Union
         origin = get_origin(annotation)
@@ -543,9 +592,11 @@ class AnnotationsRegistry:
             # The user should always put the type that should be the default first.
             return next(inner_defaulters)
 
-        return self.__defaulter_from_annotation(origin)
+        raise AnnotationProcessorError(
+            f"No defaulter handles the type arguments of annotation: {annotation}."
+        )
 
-    def __converter_from_annotation(self, annotation: Annotation) -> Converter:
+    def _create_converter(self, annotation: Annotation) -> Converter:
         """Get the converter for a specific annotation.
 
         Args:
@@ -555,15 +606,18 @@ class AnnotationsRegistry:
             Converter: The converter for the specified annotation.
         """
 
-        cache_entry = self.__cache[annotation]
-        if cache_entry.converter:
-            return cache_entry.converter
-
         entry = self.get_processor(annotation)
 
         # Absolute prority to registered processors.
         if entry and entry.convert:
             return entry.convert
+
+        expanded = _expand_type_alias(annotation)
+        if expanded is not annotation:
+            return self.__converter_from_annotation(expanded)
+
+        if get_origin(annotation) is Annotated:
+            return self.__converter_from_annotation(get_args(annotation)[0])
 
         # The annotation might still be a composite type. Composites are not types.
         if isinstance(annotation, type):
@@ -603,7 +657,9 @@ class AnnotationsRegistry:
             )
             return union_converter(inner_converters, annotation, self)
 
-        return self.__converter_from_annotation(origin)
+        raise AnnotationProcessorError(
+            f"No converter handles the type arguments of annotation: {annotation}."
+        )
 
     def processors_from_annotation(
         self, annotation: Annotation, *,
@@ -730,10 +786,26 @@ class AnnotationsRegistry:
         nglobals: dict[str, Any] | None = None,
         nlocals: dict[str, Any] | None = None,
     ) -> bool | ValidationLevel:
-        """This function is a shortcut to self.validator_from_annotation(annotation)(value)."""
+        """This function is a shortcut to self.validator_from_annotation(annotation)(value).
+
+        PARTIAL is truthy. Use fully_matches_annotation for a boolean full match.
+        """
         return self.validator_from_annotation(
             annotation, nglobals=nglobals, nlocals=nlocals
         )(value)
+
+    def fully_matches_annotation(
+        self, annotation: Annotation, value: Any, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> bool:
+        """Return True only for FULL or True; PARTIAL and NONE return False.
+
+        Invalid or unsupported annotations still raise their processing errors.
+        """
+        return self.validate_with_annotation(
+            annotation, value, nglobals=nglobals, nlocals=nlocals
+        ) == ValidationLevel.FULL
 
     def default_annotation(
         self, annotation: Annotation, *,
