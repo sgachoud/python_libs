@@ -1,3 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sg-observable"
+version = "0.1.0a0"
+description = "Typed observable fields with conversion and change notifications"
+readme = "readme.md"
+license = {text = "MIT"}
+requires-python = ">=3.13"
+dependencies = ["sg-metacore>=0.1.0a0", "numpy"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pyright>=1.1.411"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["observable", "observable.*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+observable = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "../metacore/src"]
+pythonpath = ["src"]
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+typeCheckingMode = "standard"
+pythonVersion = "3.13"

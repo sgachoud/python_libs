@@ -44,10 +44,10 @@ from typing import (
     Callable,
     Self,
     TypeVar,
-    overload,
     get_args,
     get_origin,
     cast,
+    overload,
 )
 
 import numpy as np
@@ -232,13 +232,13 @@ def auto_field[T, I = T](
     assigner: Callable[[Observable, T], None] | None = None,
     setter: Callable[[Observable, I], None] | None = None,
     getter: Callable[[Observable], T] | None = None,
-) -> Any:
+) -> ObservableField[T, I]:
     """Declare a field; the metaclass replaces this configuration with a descriptor.
 
     The return type permits assignment to an ObservableField annotation while the
     runtime configuration retains the decorator methods used in the class body.
     """
-    return AutoField(
+    configuration = AutoField[T, I](
         default,
         default_factory,
         access,
@@ -250,6 +250,8 @@ def auto_field[T, I = T](
         setter,
         getter,
     )
+    # The metaclass turns this declaration into a descriptor before the class is used.
+    return cast(ObservableField[T, I], configuration)
 
 
 class ObservableField[T, I = T](ObservableFieldDecorators[T, I]):
@@ -389,10 +391,13 @@ class ObservableField[T, I = T](ObservableFieldDecorators[T, I]):
         self.name = name
 
     @overload
-    def __get__(self, instance: None, owner: type, /) -> Self: ...
+    def __get__(
+        self, instance: None, owner: type[Observable] | None = None
+    ) -> Self: ...
+
     @overload
     def __get__(
-        self, instance: Observable, owner: type[Observable] | None = None, /
+        self, instance: Observable, owner: type[Observable] | None = None
     ) -> T: ...
 
     def __get__(

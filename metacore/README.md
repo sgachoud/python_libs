@@ -81,8 +81,8 @@ values = convert_to_annotation("list[Item]", ["1", "2"], nlocals={"Item": int})
 The validation, defaulting, and conversion helpers and registry methods accept
 keyword-only `nglobals` and `nlocals`. Registry cache-clearing methods accept them
 as well. Names are resolved for each call; namespaces are not stored on the shared
-registry. Constant namespaces and observable field declarations supply their
-declaring module and class namespaces automatically.
+registry. Constant namespaces supply their declaring module and class namespaces
+automatically.
 
 ## Features
 
@@ -159,8 +159,10 @@ class MyError(TracedException):
 
 ## Installation
 
+Install the `sg-metacore` package from PyPI:
+
 ```bash
-pip install sg-metacore
+python -m pip install sg-metacore
 ```
 
 ## Requirements
