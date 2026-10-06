@@ -61,6 +61,28 @@ from metacore.constants import (
 class TestConstantNamespaceCreation:
     """Test basic creation and access of constant namespaces."""
 
+    def test_forward_references_use_declaring_module_and_class(self, monkeypatch):
+        import sys
+        from types import ModuleType
+
+        module = ModuleType("constant_namespace_resolution_test")
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        exec(
+            "from __future__ import annotations\n"
+            "from pathlib import Path\n"
+            "from metacore import ConstantNamespace\n"
+            "Alias = str\n"
+            "class Settings(ConstantNamespace):\n"
+            "    Alias = int\n"
+            "    count: Alias = '42'\n"
+            "    directory: Path = 'documents'\n"
+            "    values: list['Alias'] = ['1', '2']\n",
+            module.__dict__,
+        )
+        assert module.Settings.count == 42
+        assert module.Settings.directory == Path("documents")
+        assert module.Settings.values == [1, 2]
+
     def test_basic_constant_creation(self):
         """Test creating a simple constant namespace."""
 

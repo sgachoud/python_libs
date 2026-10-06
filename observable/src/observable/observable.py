@@ -47,7 +47,6 @@ from typing import (
     overload,
     get_args,
     get_origin,
-    get_type_hints,
     cast,
 )
 
@@ -55,32 +54,9 @@ import numpy as np
 
 from metacore import TracedException, annotation_registry
 from metacore.annotations import AnnotationsRegistry
+from metacore.typing import resolve_annotation_types
 
 type Observer = Callable[..., Any]
-
-
-# TODO: replace with metacore.typing ones
-def resolve_annotation_types(
-    annotations: dict[str, Any],
-    nglobals: dict[str, Any] | None = None,
-    nlocals: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """
-    Get type hints from a dictionary of annotations. See typing.get_type_hints.
-
-    This function is useful when you want to get the type hints from a dictionary
-    of annotations instead of a class or a function.
-
-    Args:
-        annotations (dict[str, Any]): A dictionary of annotations.
-        nglobals (dict[str, Any] | None): Globals to resolve forward refs against.
-        nlocals (dict[str, Any] | None): Locals to resolve forward refs against.
-
-    Returns:
-        dict[str, Any]: A dictionary of type hints.
-    """
-    X = type("X", (), {"__annotations__": annotations})
-    return get_type_hints(X, nglobals, nlocals)
 
 
 class ObservableFieldError(TracedException):

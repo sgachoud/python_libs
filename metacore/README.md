@@ -65,6 +65,25 @@ and `typing_utilities` import paths have been removed.
 `AnnotationsRegistry()` for an independent registry with its own built-in handlers
 and customizations. Neither requires importing a handler module first.
 
+For string annotations or nested forward references, supply the namespaces where
+the names are defined:
+
+```python
+from metacore import convert_to_annotation
+from metacore.typing import resolve_annotation_types
+
+types = resolve_annotation_types(
+    {"values": "list[Item]"}, nglobals=globals(), nlocals={"Item": int}
+)
+values = convert_to_annotation("list[Item]", ["1", "2"], nlocals={"Item": int})
+```
+
+The validation, defaulting, and conversion helpers and registry methods accept
+keyword-only `nglobals` and `nlocals`. Registry cache-clearing methods accept them
+as well. Names are resolved for each call; namespaces are not stored on the shared
+registry. Constant namespaces and observable field declarations supply their
+declaring module and class namespaces automatically.
+
 ## Features
 
 ### ConstantNamespace

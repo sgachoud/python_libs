@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import assert_type
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,20 @@ from observable.observable import (
 
 class Counter(Observable):
     value: ObservableField[int, str] = auto_field(default=0)
+
+
+def test_field_annotations_resolve_module_and_class_local_names():
+    class Scoped(Observable):
+        from decimal import Decimal as Scalar
+
+        value: ObservableField[Scalar, str] = auto_field(default=Auto)
+        directory: ObservableField[Path, str] = auto_field(default=Auto)
+
+    instance = Scoped()
+    instance.value = "1.25"
+    instance.directory = "documents"
+    assert instance.value == Scoped.Scalar("1.25")
+    assert instance.directory == Path("documents")
 
 
 def test_conversion_notifications_and_instance_isolation():

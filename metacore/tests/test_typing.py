@@ -2,6 +2,8 @@
 
 from typing import Any, Optional, Union
 
+import pytest
+
 from metacore.typing import (
     Implement,
     is_union,
@@ -63,3 +65,28 @@ class TestTypeUtilities:
         resolved = resolve_annotation_types(annotations)
         assert resolved["x"] is int
         assert resolved["y"] is str
+
+    def test_resolve_with_explicit_global_namespace(self):
+        annotations = {"items": list["Item"]}
+        resolved = resolve_annotation_types(annotations, {"Item": int})
+        assert resolved == {"items": list[int]}
+        assert annotations == {"items": list["Item"]}
+
+    def test_local_names_override_global_names(self):
+        resolved = resolve_annotation_types(
+            {"value": "Item", "other": "Other"},
+            nglobals={"Item": str, "Other": float},
+            nlocals={"Item": int},
+        )
+        assert resolved == {"value": int, "other": float}
+
+    def test_resolve_with_only_local_namespace(self):
+        class Item:
+            pass
+
+        resolved = resolve_annotation_types({"value": "Item"}, nlocals=locals())
+        assert resolved["value"] is Item
+
+    def test_unknown_forward_reference_still_raises(self):
+        with pytest.raises(NameError):
+            resolve_annotation_types({"value": "MissingType"}, {}, {})

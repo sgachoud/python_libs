@@ -50,7 +50,11 @@ def is_binary_optional(annotation: Annotation) -> bool:
     return len(args) == 2 and NoneType in args
 
 
-def resolve_annotation_types(annotations: dict[str, Any]) -> dict[str, Annotation]:
+def resolve_annotation_types(
+    annotations: dict[str, Any],
+    nglobals: dict[str, Any] | None = None,
+    nlocals: dict[str, Any] | None = None,
+) -> dict[str, Annotation]:
     """
     Get type hints from a dictionary of annotations. See typing.get_type_hints.
 
@@ -59,12 +63,14 @@ def resolve_annotation_types(annotations: dict[str, Any]) -> dict[str, Annotatio
 
     Args:
         annotations (dict[str, Any]): A dictionary of annotations.
+        nglobals (dict[str, Any] | None): Globals to resolve forward refs against.
+        nlocals (dict[str, Any] | None): Locals to resolve forward refs against.
 
     Returns:
         dict[str, Any]: A dictionary of type hints.
     """
     X = type("X", (), {"__annotations__": annotations})
-    return get_type_hints(X)
+    return get_type_hints(X, globalns=nglobals, localns=nlocals)
 
 
 class _ImplementMeta(type):

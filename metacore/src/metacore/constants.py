@@ -96,7 +96,11 @@ def _verify_annotations_and_coerce(
         ConstantsCompositionError: Raised when an annotated member value is missing.
     """
     if "__annotations__" in namespace:
-        annotations = resolve_annotation_types(namespace["__annotations__"])
+        module = sys.modules.get(namespace.get("__module__", ""))
+        nglobals = module.__dict__ if module is not None else None
+        annotations = resolve_annotation_types(
+            namespace["__annotations__"], nglobals=nglobals, nlocals=namespace
+        )
         for key in annotations:
             if key not in namespace["__constants__"]:
                 continue

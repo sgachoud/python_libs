@@ -144,6 +144,11 @@ class AnnotationsRegistry:
     """
     A class to hold all the processors, and processors creator for annotations. It allows
     customization.
+
+    Processing and cache-clearing methods accept keyword-only ``nglobals`` and
+    ``nlocals`` dictionaries for resolving forward references. Pass the namespaces
+    where the annotation was declared; omitted namespaces retain get_type_hints
+    defaults. Register custom processors with resolved annotation objects.
     """
 
     class CacheEntry:
@@ -172,7 +177,11 @@ class AnnotationsRegistry:
 
         register_builtins(self)
 
-    def clear_validator_cache_for_annotation(self, annotation: Annotation) -> None:
+    def clear_validator_cache_for_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> None:
         """Clear the validator cache for a specific annotation.
 
         Args:
@@ -180,11 +189,15 @@ class AnnotationsRegistry:
         """
         if annotation in self.__cache:
             self.__cache[annotation].validator = None
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         if annotation in self.__cache:
             self.__cache[annotation].validator = None
 
-    def clear_defaulter_cache_for_annotation(self, annotation: Annotation) -> None:
+    def clear_defaulter_cache_for_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> None:
         """Clear the defaulter cache for a specific annotation.
 
         Args:
@@ -192,11 +205,15 @@ class AnnotationsRegistry:
         """
         if annotation in self.__cache:
             self.__cache[annotation].defaulter = None
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         if annotation in self.__cache:
             self.__cache[annotation].defaulter = None
 
-    def clear_converter_cache_for_annotation(self, annotation: Annotation) -> None:
+    def clear_converter_cache_for_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> None:
         """Clear the converter cache for a specific annotation.
 
         Args:
@@ -204,11 +221,15 @@ class AnnotationsRegistry:
         """
         if annotation in self.__cache:
             self.__cache[annotation].converter = None
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         if annotation in self.__cache:
             self.__cache[annotation].converter = None
 
-    def clear_cache_for_annotation(self, annotation: Annotation) -> None:
+    def clear_cache_for_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> None:
         """Clear the cache for a specific annotation.
 
         Args:
@@ -216,7 +237,7 @@ class AnnotationsRegistry:
         """
         if annotation in self.__cache:
             del self.__cache[annotation]
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         if annotation in self.__cache:
             del self.__cache[annotation]
 
@@ -585,7 +606,9 @@ class AnnotationsRegistry:
         return self.__converter_from_annotation(origin)
 
     def processors_from_annotation(
-        self, annotation: Annotation
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
     ) -> tuple[Validator | Exception, Defaulter | Exception, Converter | Exception]:
         """Get the validator, defaulter and converter for a specific annotation.
 
@@ -597,7 +620,7 @@ class AnnotationsRegistry:
             tuple[Validator | Exception, Defaulter | Exception, Converter | Exception]: The
                 validator, defaulter and converter for the specified annotation.
         """
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         try:
             v = self.__validator_from_annotation(annotation)
         except TypingError as e:
@@ -613,7 +636,11 @@ class AnnotationsRegistry:
 
         return v, d, c
 
-    def validator_from_annotation(self, annotation: Annotation) -> Validator:
+    def validator_from_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> Validator:
         """Provides a callable that validates a value with an annotation. If one of the type in the
         annotation if not known, an error is raised.
 
@@ -632,10 +659,14 @@ class AnnotationsRegistry:
         Returns:
             Validator: The validator function for the provided annotation.
         """
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         return self.__validator_from_annotation(annotation)
 
-    def defaulter_from_annotation(self, annotation: Annotation) -> Defaulter:
+    def defaulter_from_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> Defaulter:
         """Provides a callable that defaults an annotation. If one of the type in the annotation
         if not known, an error is raised.
 
@@ -653,10 +684,14 @@ class AnnotationsRegistry:
         Returns:
             Defaulter: The defaulter function for the provided annotation.
         """
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         return self.__defaulter_from_annotation(annotation)
 
-    def converter_from_annotation(self, annotation: Annotation) -> Converter:
+    def converter_from_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> Converter:
         """Provides a callable that converts a value to an annotation. If one of the type in the
         annotation if not known, an error is raised. When called, the function will raise a
         ConvertingToAnnotationTypeError if the provided value cannot be converted.
@@ -687,19 +722,35 @@ class AnnotationsRegistry:
         Returns:
             Converter: The converter function for the provided annotation.
         """
-        annotation = resolve_annotation_types({"_": annotation})["_"]
+        annotation = resolve_annotation_types({"_": annotation}, nglobals, nlocals)["_"]
         return self.__converter_from_annotation(annotation)
 
     def validate_with_annotation(
-        self, annotation: Annotation, value: Any
+        self, annotation: Annotation, value: Any, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
     ) -> bool | ValidationLevel:
         """This function is a shortcut to self.validator_from_annotation(annotation)(value)."""
-        return self.validator_from_annotation(annotation)(value)
+        return self.validator_from_annotation(
+            annotation, nglobals=nglobals, nlocals=nlocals
+        )(value)
 
-    def default_annotation(self, annotation: Annotation) -> Any:
+    def default_annotation(
+        self, annotation: Annotation, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> Any:
         """This function is a shortcut to self.defaulter_from_annotation(annotation)()."""
-        return self.defaulter_from_annotation(annotation)()
+        return self.defaulter_from_annotation(
+            annotation, nglobals=nglobals, nlocals=nlocals
+        )()
 
-    def convert_to_annotation(self, annotation: Annotation, value: Any) -> Any:
+    def convert_to_annotation(
+        self, annotation: Annotation, value: Any, *,
+        nglobals: dict[str, Any] | None = None,
+        nlocals: dict[str, Any] | None = None,
+    ) -> Any:
         """This function is a shortcut to self.converter_from_annotation(annotation)(value)."""
-        return self.converter_from_annotation(annotation)(value)
+        return self.converter_from_annotation(
+            annotation, nglobals=nglobals, nlocals=nlocals
+        )(value)

@@ -435,6 +435,55 @@ class TestIndependentRegistries:
         assert converter(["1", "2"]) == [1, 2]
 
 
+class TestAnnotationNamespaces:
+    @pytest.mark.parametrize("use_shared_api", [False, True])
+    def test_processing_methods_forward_both_namespaces(self, use_shared_api):
+        import metacore
+
+        api = metacore if use_shared_api else AnnotationsRegistry()
+        context = {"nglobals": {"Item": str}, "nlocals": {"Item": int}}
+        assert api.validator_from_annotation("Item", **context)(42)
+        assert api.defaulter_from_annotation("Item", **context)() == 0
+        assert api.converter_from_annotation("Item", **context)("42") == 42
+        assert api.convert_to_annotation("list['Item']", ["1", "2"], **context) == [1, 2]
+        if use_shared_api:
+            assert api.validate_from_annotation("Item", 42, **context)
+            assert api.default_from_annotation("Item", **context) == 0
+        else:
+            assert api.validate_with_annotation("Item", 42, **context)
+            assert api.default_annotation("Item", **context) == 0
+
+    def test_processor_bundle_uses_explicit_namespace(self):
+        registry = AnnotationsRegistry()
+        validator, defaulter, converter = registry.processors_from_annotation(
+            "Item", nglobals={"Item": str}, nlocals={"Item": int}
+        )
+        assert callable(validator) and validator(42)
+        assert callable(defaulter) and defaulter() == 0
+        assert callable(converter) and converter("42") == 42
+
+    def test_namespaces_do_not_leak_between_calls(self):
+        registry = AnnotationsRegistry()
+        assert registry.convert_to_annotation("Item", "42", nglobals={"Item": int}) == 42
+        assert registry.convert_to_annotation("Item", 42, nglobals={"Item": str}) == "42"
+        with pytest.raises(NameError):
+            registry.convert_to_annotation("Item", "42")
+
+    @pytest.mark.parametrize("method_name", [
+        "clear_validator_cache_for_annotation",
+        "clear_defaulter_cache_for_annotation",
+        "clear_converter_cache_for_annotation",
+        "clear_cache_for_annotation",
+    ])
+    def test_cache_clearing_resolves_forward_references(self, method_name):
+        registry = AnnotationsRegistry()
+        registry.convert_to_annotation(list[int], ["1"])
+        getattr(registry, method_name)(
+            "list[Item]", nglobals={"Item": str}, nlocals={"Item": int}
+        )
+        assert registry.convert_to_annotation(list[int], ["2"]) == [2]
+
+
 class TestCustomTypeRegistration:
     """Test custom type registration functionality."""
 
