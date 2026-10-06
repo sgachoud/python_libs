@@ -1,0 +1,10 @@
+{
+    "include": ["metacore/src", "observable/src", "observable/tests"],
+    "extraPaths": ["metacore/src", "observable/src"],
+    "typeCheckingMode": "standard",
+    "pythonVersion": "3.13",
+    "executionEnvironments": [
+        {"root": "metacore/src", "pythonVersion": "3.12"},
+        {"root": "observable/src", "pythonVersion": "3.13"}
+    ]
+}

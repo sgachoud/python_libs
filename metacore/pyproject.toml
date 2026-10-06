@@ -26,6 +26,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
+    "pyright>=1.1.411",
     "pytest>=7.0",
     "pytest-cov>=4.0",
 ]
@@ -40,9 +41,15 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["metacore", "metacore.*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+metacore = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
