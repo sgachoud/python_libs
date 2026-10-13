@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sg-metacore"
-version = "0.1.0-alpha"
+version = "0.1.0a1"
 description = "A sophisticated type system enhancement library for metaprogramming and runtime behavior modification"
 readme = "README.md"
 authors = [
