@@ -369,22 +369,16 @@ class ObservableField[T, I = T](ObservableFieldDecorators[T, I]):
         instance.notify(self, value)
 
     def default_get(self, instance: Observable) -> T:
-        """Return the stored value or default, enforcing the read policy."""
+        """Return the stored value or default, or raise if neither is available."""
         # pylint: disable=protected-access
-        if Access.read not in self.access:
-            raise ReadAccessViolationError(
-                f"Cannot read attribute '{self.name}', read is not allowed."
-            )
-        if Access.write not in self.access:
-            if self.default is not Empty:
-                return cast(T, self.default)
-            raise UninitializedError(
-                f"Attribute '{self.name}' has not value and is not writable."
-            )
         if self in instance._observable_values:
             return instance._observable_values[self]
         if self.default is not Empty:
             return cast(T, self.default)
+        if Access.write not in self.access:
+            raise UninitializedError(
+                f"Attribute '{self.name}' has not value and is not writable."
+            )
         raise UninitializedError(f"Attribute '{self.name}' is not initialized.")
 
     def __set_name__(self, owner: type, name: str) -> None:
@@ -405,6 +399,10 @@ class ObservableField[T, I = T](ObservableFieldDecorators[T, I]):
     ) -> T | Self:
         if instance is None:
             return self
+        if Access.read not in self.access:
+            raise ReadAccessViolationError(
+                f"Cannot read attribute '{self.name}', read is not allowed."
+            )
         return self._getter(instance)
 
     def __set__(self, instance: Observable, value: I) -> None:
@@ -426,13 +424,31 @@ class ObservableMeta(type):
         /,
         **kwargs: Any,
     ) -> ObservableMeta:
+        # Python 3.14 defers class annotations unless postponed annotations are enabled.
+        if sys.version_info >= (3, 14):
+            # Import only on interpreters that provide annotationlib.
+            # pylint: disable-next=import-outside-toplevel
+            from annotationlib import (
+                Format,
+                call_annotate_function,
+                get_annotate_from_class_namespace,
+            )
+
+            if "__annotations__" not in namespace:
+                annotate = get_annotate_from_class_namespace(namespace)
+                if annotate is not None:
+                    namespace["__annotations__"] = call_annotate_function(
+                        annotate, Format.FORWARDREF
+                    )
+
         fields = mcs._collect_observable_fields(bases, namespace)
+        mcs._populate_observables(namespace, fields)
+        new_class = super().__new__(mcs, name, bases, namespace, **kwargs)
         # Inherited descriptors have already been finalized by their declaring class.
         for value in namespace.values():
             if isinstance(value, ObservableField):
                 value.__post_init__()
-        mcs._populate_observables(namespace, fields)
-        return super().__new__(mcs, name, bases, namespace, **kwargs)
+        return new_class
 
     @classmethod
     def _collect_observable_fields(
@@ -465,7 +481,7 @@ class ObservableMeta(type):
             name
         ]
         orig = get_origin(annotation)
-        if orig is None or orig is not ObservableField:
+        if orig is None or not issubclass(orig, ObservableField):
             raise TypeError(
                 f"Automatic field '{name}' must be annotated as an ObservableField."
             )
